@@ -1,4 +1,13 @@
+github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
+github.com/cespare/xxhash v1.1.0 h1:a6HrQnmkObjyL+Gs60czilIUGqrzKutQD6XZog3p+ko=
+github.com/cespare/xxhash v1.1.0/go.mod h1:XrSqR1VqqWfGrhpAt58auRo0WTKS1nRRg3ghfAqPWnc=
 github.com/dvyukov/go-fuzz v0.0.0-20180902053217-4aff8368ef19 h1:5cILK9eRg5plZe3r/1tGYjiET+0CrVfYE4Pk9fxDiHA=
 github.com/dvyukov/go-fuzz v0.0.0-20180902053217-4aff8368ef19/go.mod h1:11Gm+ccJnvAhCNLlf5+cS9KjtbaD5I5zaZpFMsTHWTw=
+github.com/influxdata/influxdb v1.6.4 h1:r+X/d8WTO9ZiCOyXBBMVKiwn+LNGZiB4z4C6axyYpIg=
+github.com/minio/highwayhash v0.0.0-20180501080913-85fc8a2dacad h1:L+8skVz2lusCbtlalLXmJp+TK8XaGAsZ3utSC3k5Jc0=
+github.com/minio/highwayhash v0.0.0-20180501080913-85fc8a2dacad/go.mod h1:NL8wme5P5MoscwAkXfGroz3VgpCdhBw3KYOu5mEsvpU=
+github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72/go.mod h1:JwIasOWyU6f++ZhiEuf87xNszmSA2myDM2Kzu9HwQUA=
 github.com/zeebo/errs v1.0.0 h1:uPx2/S2dQn9npw2Y9AKTae12AHkHSqk1WiaRiBNguFA=
 github.com/zeebo/errs v1.0.0/go.mod h1:Yj8dHrUQwls1bF3dr/vcSIu+qf4mI7idnTcHfoACc6I=
+golang.org/x/sys v0.0.0-20181011152604-fa43e7bc11ba h1:nZJIJPGow0Kf9bU9QTc1U6OXbs/7Hu4e+cNv+hxH+Zc=
+golang.org/x/sys v0.0.0-20181011152604-fa43e7bc11ba/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=

@@ -11,71 +11,6 @@ import (
 // Error is the class that contains all the errors from this package.
 var Error = errs.Class("node")
 
-const (
-	// the different kinds of entries. kindSentinel is used for the special
-	// element that ensures there is a root for the entire structure.
-	kindInsert = iota
-	kindTombstone
-	kindSentinel
-)
-
-const entryHeaderSize = (0 +
-	4 + // pivot
-	1 + // kind
-	4 + // key length
-	4 + // value length
-	0)
-
-// TODO(jeff): entry insertion will go faster the smaller this struct is.
-// maybe we can do more aggressive packing at the cost of making readKey
-// more expensive. pivot, kind, and value are all not used during inserts.
-
-// entry is kept in sorted order in a node's memory buffer.
-type entry struct {
-	pivot   uint32 // 0 means no pivot: there is no block 0.
-	kindOff int32  // kind is lower 8 bits of kindOff
-	key     int32
-	value   int32
-}
-
-// size returns how many bytes the entry consumes
-func (e entry) size() int64 { return int64(entryHeaderSize) + int64(e.key) + int64(e.value) }
-
-// header returns an array of bytes containing the entry header.
-func (e entry) header() (hdr [entryHeaderSize]byte) {
-	binary.BigEndian.PutUint32(hdr[0:4], uint32(e.pivot))
-	hdr[4] = byte(e.kindOff)
-	binary.BigEndian.PutUint32(hdr[5:9], uint32(e.key))
-	binary.BigEndian.PutUint32(hdr[9:13], uint32(e.value))
-	return hdr
-}
-
-// readKey returns a slice of the buffer that contains the key.
-func (e entry) readKey(buf []byte) []byte {
-	start := entryHeaderSize + e.kindOff>>8
-	return buf[start : start+e.key]
-}
-
-// readValue returns a slice of the buffer that contains the value.
-func (e entry) readValue(buf []byte) []byte {
-	start := entryHeaderSize + e.kindOff>>8 + e.key
-	return buf[start : start+e.value]
-}
-
-// readEntry returns an entry from the beginning of the buf given that
-// the buf is offset bytes in.
-func readEntry(offset int64, buf []byte) (entry, bool) {
-	if len(buf) < entryHeaderSize {
-		return entry{}, false
-	}
-	return entry{
-		pivot:   uint32(binary.BigEndian.Uint32(buf[0:4])),
-		kindOff: int32(buf[4]) | int32(offset)<<8,
-		key:     int32(binary.BigEndian.Uint32(buf[5:9])),
-		value:   int32(binary.BigEndian.Uint32(buf[9:13])),
-	}, true
-}
-
 const nodeHeaderSize = (0 +
 	4 + // capacity
 	4 + // next
@@ -103,7 +38,7 @@ func New(capacity int32, next uint32, height int16) *T {
 	}
 }
 
-var loadThunk mon.Thunk
+var loadThunk mon.Thunk // timing info for Load
 
 // Load reloads a node from the given buffer.
 func Load(buf []byte) (*T, error) {
@@ -163,7 +98,21 @@ func Load(buf []byte) (*T, error) {
 // Capacity returns the number of bytes of capacity the node has.
 func (t *T) Capacity() int32 { return t.capacity }
 
-var writeThunk mon.Thunk
+// Height returns the height of the node.
+func (t *T) Height() int16 { return t.height }
+
+// Next returns the next node pointer. It will have the same height.
+func (t *T) Next() uint32 { return t.next }
+
+// LeaderPivot returns the pivot of the entry that is the leader.
+func (t *T) LeaderPivot() uint32 {
+	if len(t.entries) == 0 {
+		return 0
+	}
+	return t.entries[0].pivot
+}
+
+var writeThunk mon.Thunk // timing info for Write
 
 // Write marshals the node to the provided buffer. It must be the
 // appropriate size.
@@ -190,13 +139,13 @@ func (t *T) Write(buf []byte) error {
 	return nil
 }
 
-// reset returns the node to the initial new state.
-func (t *T) reset() {
-	t.buf = t.buf[:32]
+// Reset returns the node to the initial new state.
+func (t *T) Reset() {
+	t.buf = t.buf[:nodeHeaderSize]
 	t.entries = t.entries[:0]
 }
 
-var insertThunk mon.Thunk
+var insertThunk mon.Thunk // timing info for Insert
 
 // Insert associates the key with the value in the node. If wrote is
 // false, then there was not enough space, and the node should be
@@ -211,6 +160,13 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 		key:     int32(len(key)),
 		value:   int32(len(value)),
 	}
+
+	// TODO(jeff): we can check to see if the entry already exists
+	// first, and then if the new value is smaller than the old one
+	// we can just overwrite it directly in the buffer. would have
+	// to remember to update the kindOff value. this could help out
+	// with reducing the number of flushes required for nodes that
+	// often see the same keys and values that don't increase.
 
 	// if we don't have the size to insert it, return false
 	// and wait for someone to flush us.
@@ -232,7 +188,32 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 	return true
 }
 
-var deleteThunk mon.Thunk
+var insertSentinelThunk mon.Thunk // timing info for InsertSentinel
+
+// InsertSentinel adds the sentinel entry to the node.
+func (t *T) InsertSentinel(pivot uint32) {
+	timer := insertSentinelThunk.Start()
+
+	// TODO(jeff): should this be a flag on New?
+
+	ent := entry{
+		pivot:   pivot,
+		kindOff: kindSentinel | int32(len(t.buf))<<8,
+		key:     0,
+		value:   0,
+	}
+
+	hdr := ent.header()
+	t.buf = append(t.buf, hdr[:]...)
+
+	t.entries = append(t.entries, entry{})
+	copy(t.entries[1:], t.entries)
+	t.entries[0] = ent
+
+	timer.Stop()
+}
+
+var deleteThunk mon.Thunk // timing info for Delete
 
 // Delete removes the key from the node. It does not reclaim space
 // in the buffer. If wrote is false, there was not enough space, and
@@ -266,7 +247,7 @@ func (t *T) Delete(key []byte) (wrote bool) {
 	return true
 }
 
-var insertEntryThunk mon.Thunk
+var insertEntryThunk mon.Thunk // timing info for insertEntry
 
 // insertEntry binary searches the slice of entries and does
 // an insertion in the correct spot. Maybe there's a better
@@ -274,13 +255,19 @@ var insertEntryThunk mon.Thunk
 func (t *T) insertEntry(key []byte, ent entry) {
 	timer := insertEntryThunk.Start()
 
+	// TODO(jeff): Should we do special case checks for if the entry is either
+	// before every entry or after every entry? Those are O(1) and would maybe
+	// improve the sorted/reverse-sorted insert cases.
+
 	i, j := 0, len(t.entries)
 
 	for i < j {
 		h := int(uint(i+j) >> 1)
-		hkey := t.entries[h].readKey(t.buf)
+		enth := t.entries[h]
 
-		if bytes.Compare(hkey, key) == -1 {
+		if byte(enth.kindOff) == kindSentinel || // is this the -infinity node?
+			bytes.Compare(enth.readKey(t.buf), key) == -1 {
+
 			i = h + 1
 		} else {
 			j = h

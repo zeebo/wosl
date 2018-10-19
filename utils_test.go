@@ -14,13 +14,3 @@ func BenchmarkHeight(b *testing.B) {
 		h += height(x, z, l)
 	}
 }
-
-func BenchmarkAlign8(b *testing.B) {
-	b.ReportAllocs()
-
-	s := int64(0)
-
-	for i := 0; i < b.N; i++ {
-		s += align8(int64(i))
-	}
-}

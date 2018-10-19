@@ -4,11 +4,6 @@ import (
 	"github.com/zeebo/wosl/internal/pcg"
 )
 
-// align8 returns the largest multiple of 8 less than size.
-func align8(size int64) int64 {
-	return size &^ 7
-}
-
 // height returns the height for the node given the success
 // probabilities in zero and later. A success probability of
 // 0 never succeeds, and 1 << 32 - 1 almost always succeeds.

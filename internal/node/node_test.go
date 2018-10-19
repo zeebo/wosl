@@ -93,7 +93,7 @@ func BenchmarkNode(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			d := numbers[i&numbersMask]
 			if !n.Insert(d, kilobuf) {
-				n.reset()
+				n.Reset()
 				resets++
 			}
 		}

@@ -1,2 +1,4 @@
 /analysis.log
 /.vscode
+/*.pprof
+/*.test
