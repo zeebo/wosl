@@ -1,0 +1,4 @@
+github.com/dvyukov/go-fuzz v0.0.0-20180902053217-4aff8368ef19 h1:5cILK9eRg5plZe3r/1tGYjiET+0CrVfYE4Pk9fxDiHA=
+github.com/dvyukov/go-fuzz v0.0.0-20180902053217-4aff8368ef19/go.mod h1:11Gm+ccJnvAhCNLlf5+cS9KjtbaD5I5zaZpFMsTHWTw=
+github.com/zeebo/errs v1.0.0 h1:uPx2/S2dQn9npw2Y9AKTae12AHkHSqk1WiaRiBNguFA=
+github.com/zeebo/errs v1.0.0/go.mod h1:Yj8dHrUQwls1bF3dr/vcSIu+qf4mI7idnTcHfoACc6I=
