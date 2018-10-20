@@ -66,47 +66,93 @@ func TestNode(t *testing.T) {
 }
 
 func BenchmarkNode(b *testing.B) {
-	// Generate a full node and its written form for some
-	// of the benchmarks
-	n := New(4<<20, 0)
-	for {
-		d := numbers[rand.Intn(numbersSize)&numbersMask]
-		if !n.Insert(d, kilobuf) {
-			break
-		}
-	}
-	buf := make([]byte, n.Capacity())
-	assert.NoError(b, n.Write(buf))
-
 	b.Run("Insert", func(b *testing.B) {
-		n := New(4<<20, 0)
-		resets := 0
-		b.ReportAllocs()
+		run := func(b *testing.B, v []byte) {
+			b.Helper()
 
-		for i := 0; i < b.N; i++ {
-			d := numbers[i&numbersMask]
-			if !n.Insert(d, kilobuf[:16]) {
-				n.Reset()
-				resets++
+			n := New(4<<20, 0)
+			resets := 0
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				d := numbers[i&numbersMask]
+				if !n.Insert(d, v) {
+					n.Reset()
+					resets++
+				}
 			}
+
+			b.Log("iterations:", b.N, "resets:", resets)
 		}
 
-		b.Log(b.N, resets)
+		b.Run("Large", func(b *testing.B) { run(b, kilobuf) })
+		b.Run("Small", func(b *testing.B) { run(b, kilobuf[:16]) })
 	})
 
 	b.Run("Write", func(b *testing.B) {
-		b.ReportAllocs()
+		run := func(b *testing.B, v []byte) {
+			b.Helper()
 
-		for i := 0; i < b.N; i++ {
-			n.Write(buf)
+			writes := 0
+			n := New(4<<20, 0)
+			for {
+				d := numbers[rand.Intn(numbersSize)&numbersMask]
+				if !n.Insert(d, v) {
+					break
+				}
+				writes++
+			}
+			buf := make([]byte, n.Capacity())
+
+			b.SetBytes(int64(len(buf)))
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				n.Write(buf)
+			}
+
+			if b.N == 1 {
+				b.Log("entries:", writes)
+			}
 		}
+
+		b.Run("Large", func(b *testing.B) { run(b, kilobuf) })
+		b.Run("Small", func(b *testing.B) { run(b, kilobuf[:16]) })
 	})
 
 	b.Run("Load", func(b *testing.B) {
-		b.ReportAllocs()
+		run := func(b *testing.B, v []byte) {
+			b.Helper()
 
-		for i := 0; i < b.N; i++ {
-			Load(buf)
+			writes := 0
+			n := New(4<<20, 0)
+			for {
+				d := numbers[rand.Intn(numbersSize)&numbersMask]
+				if !n.Insert(d, v) {
+					break
+				}
+				writes++
+			}
+			buf := make([]byte, n.Capacity())
+			assert.NoError(b, n.Write(buf))
+
+			b.SetBytes(int64(len(buf)))
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				Load(buf)
+			}
+
+			if b.N == 1 {
+				b.Log("entries:", writes)
+			}
 		}
+
+		b.Run("Large", func(b *testing.B) { run(b, kilobuf) })
+		b.Run("Small", func(b *testing.B) { run(b, kilobuf[:16]) })
 	})
 }

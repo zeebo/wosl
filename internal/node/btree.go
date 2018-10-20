@@ -267,7 +267,11 @@ func (b *btree) Iter(cb func(ent entry) bool) {
 	}
 
 	for !n.leaf {
-		n = b.nodes[n.payload[0].pivot]
+		nid := n.payload[0].pivot
+		if n.count == 0 {
+			nid = n.next
+		}
+		n = b.nodes[nid]
 	}
 
 	for {

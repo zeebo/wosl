@@ -49,7 +49,7 @@ func dump(b *btree, buf []byte) {
 
 		if n.parent != invalidNode {
 			fmt.Println(`edge[constraint=false];`)
-			fmt.Printf(`node%d:fe:n -> node%d:fn:s [style="dashed",color="#0000ff20"];`+"\n", nid, n.parent)
+			fmt.Printf(`node%d:fn:n -> node%d:fn:s [style="dashed",color="#0000ff20"];`+"\n", nid, n.parent)
 			fmt.Println(`edge[constraint=true];`)
 		}
 		if n.prev != invalidNode {

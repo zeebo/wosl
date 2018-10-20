@@ -8,10 +8,8 @@ type btreeBulk struct {
 
 func (b *btreeBulk) append(ent entry) {
 	if b.n == nil {
-		b.b.root, b.b.rid = b.b.alloc(false)
 		b.n, b.nid = b.b.alloc(true)
-		b.b.root.next = b.nid
-		b.n.parent = b.b.rid
+		b.b.root, b.b.rid = b.n, b.nid
 	}
 	b.b.append(b.n, b.nid, ent)
 }

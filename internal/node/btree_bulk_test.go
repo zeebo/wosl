@@ -27,4 +27,28 @@ func TestBtreeBulk(t *testing.T) {
 			return true
 		})
 	})
+
+	t.Run("One", func(t *testing.T) {
+		var bu btreeBulk
+		var buf []byte
+
+		ent, _ := newEntry(&buf, "0", "")
+		bu.append(ent)
+		bt := bu.done()
+
+		bt.Iter(func(ent entry) bool {
+			assert.Equal(t, string(ent.readKey(buf)), "0")
+			return true
+		})
+	})
+
+	t.Run("Zero", func(t *testing.T) {
+		var bu btreeBulk
+		bt := bu.done()
+
+		bt.Iter(func(ent entry) bool {
+			t.Fatal("expected no entries")
+			return true
+		})
+	})
 }

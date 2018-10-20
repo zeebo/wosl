@@ -30,9 +30,6 @@ func TestBtree(t *testing.T) {
 		}
 
 		sort.Strings(keys)
-		for _, key := range keys {
-			t.Log(key)
-		}
 
 		for i := uint8(0); i < n.count; i++ {
 			assert.Equal(t, string(n.payload[i].readKey(buf)), keys[i])
