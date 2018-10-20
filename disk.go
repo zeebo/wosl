@@ -1,4 +1,4 @@
-package io
+package wosl
 
 // Disk is an interface abstracting some persistent storage.
 type Disk interface {

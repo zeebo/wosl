@@ -23,6 +23,6 @@ func BenchmarkWosl(b *testing.B) {
 	assert.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
-		assert.NoError(b, sl.Insert(numbers[i&numbersMask], kilobuf))
+		sl.Insert(numbers[i&numbersMask], kilobuf)
 	}
 }

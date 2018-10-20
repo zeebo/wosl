@@ -2,3 +2,4 @@
 /.vscode
 /*.pprof
 /*.test
+graph.svg

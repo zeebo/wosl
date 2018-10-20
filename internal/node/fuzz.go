@@ -11,7 +11,7 @@ func Fuzz(data []byte) int {
 	}
 	binary.BigEndian.PutUint32(data[0:4], uint32(len(data)))
 
-	// limit count to 16k
+	// limit entry count to 16k
 	data[8] = 0
 	data[9] = 0
 

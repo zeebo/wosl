@@ -1,8 +1,8 @@
 package node
 
 import (
-	"bytes"
 	"encoding/binary"
+	"math"
 
 	"github.com/zeebo/errs"
 	"github.com/zeebo/wosl/internal/mon"
@@ -14,8 +14,8 @@ var Error = errs.Class("node")
 const nodeHeaderSize = (0 +
 	4 + // capacity
 	4 + // next
+	4 + // pivot
 	4 + // count
-	2 + // height
 	0)
 
 // T is a node in a write-optimized skip list. It targets a specific size
@@ -23,18 +23,17 @@ const nodeHeaderSize = (0 +
 type T struct {
 	buf      []byte // contains metadata and then key/value data
 	capacity int32  // capacity of the node
-	next     uint32 // pointer to the next node
-	height   int16  // the height of the node
-	entries  []entry
+	next     uint32 // pointer to the next node (or 0)
+	pivot    uint32 // pivot for special root node
+	entries  btree  // btree of entries into buf
 }
 
 // New returns a node with a buffer size of the given size.
-func New(capacity int32, next uint32, height int16) *T {
+func New(capacity int32, next uint32) *T {
 	return &T{
 		buf:      make([]byte, nodeHeaderSize, capacity),
 		capacity: capacity,
 		next:     next,
-		height:   height,
 	}
 }
 
@@ -42,9 +41,15 @@ var loadThunk mon.Thunk // timing info for Load
 
 // Load reloads a node from the given buffer.
 func Load(buf []byte) (*T, error) {
-	defer loadThunk.Start().Stop()
+	timer := loadThunk.Start()
+
+	// TODO(jeff): Consider only doing O(1) loading of the buffer
+	// and doing a double index into the buffer in order to read
+	// entries, rather than keeping an entries slice. this may
+	// complicate the insert path quite a bit, though.
 
 	if len(buf) < nodeHeaderSize {
+		timer.Stop()
 		return nil, Error.New("buffer too small: %d", buf)
 	}
 
@@ -52,65 +57,69 @@ func Load(buf []byte) (*T, error) {
 	var (
 		capacity = int32(binary.BigEndian.Uint32(buf[0:4]))
 		next     = uint32(binary.BigEndian.Uint32(buf[4:8]))
-		count    = int32(binary.BigEndian.Uint32(buf[8:12]))
-		height   = int16(binary.BigEndian.Uint16(buf[12:14]))
+		pivot    = uint32(binary.BigEndian.Uint32(buf[8:12]))
+		count    = int32(binary.BigEndian.Uint32(buf[12:16]))
 	)
 
 	if int32(len(buf)) != capacity {
+		timer.Stop()
 		return nil, Error.New("buffer capacity does not match length: %d != %d",
 			capacity, len(buf))
 	}
 	if count < 0 {
+		timer.Stop()
 		return nil, Error.New("invalid count: %d", count)
 	}
 
 	// read in the entries
-	offset := int64(nodeHeaderSize)
-	entries := make([]entry, 0, count)
+	bulk := new(btreeBulk)
+	offset := uint32(nodeHeaderSize)
 	b := buf[nodeHeaderSize:]
 
 	for i := int32(0); i < count; i++ {
 		ent, ok := readEntry(offset, b)
 		if !ok {
+			timer.Stop()
 			return nil, Error.New("buffer did not contain enough entries: %d != %d",
 				i, count)
 		}
 
 		size := ent.size()
-		if int64(len(b)) < size {
+		if int64(len(b)) < size || size > math.MaxUint32 {
+			timer.Stop()
 			return nil, Error.New("entry key/value data overran buffer")
 		}
 
-		offset += size
+		offset += uint32(size)
 		b = b[size:]
-		entries = append(entries, ent)
+
+		bulk.append(ent)
 	}
 
+	timer.Stop()
 	return &T{
 		buf:      buf,
 		capacity: capacity,
 		next:     next,
-		height:   height,
-		entries:  entries,
+		pivot:    pivot,
+		entries:  bulk.done(),
 	}, nil
 }
 
 // Capacity returns the number of bytes of capacity the node has.
 func (t *T) Capacity() int32 { return t.capacity }
 
-// Height returns the height of the node.
-func (t *T) Height() int16 { return t.height }
-
-// Next returns the next node pointer. It will have the same height.
+// Next returns the next node pointer.
 func (t *T) Next() uint32 { return t.next }
 
-// LeaderPivot returns the pivot of the entry that is the leader.
-func (t *T) LeaderPivot() uint32 {
-	if len(t.entries) == 0 {
-		return 0
-	}
-	return t.entries[0].pivot
-}
+// SetNext sets the next pointer.
+func (t *T) SetNext(next uint32) { t.next = next }
+
+// Pivot returns the pivot node pointer for the root nodes.
+func (t *T) Pivot() uint32 { return t.pivot }
+
+// SetPivot sets the next pointer.
+func (t *T) SetPivot(pivot uint32) { t.pivot = pivot }
 
 var writeThunk mon.Thunk // timing info for Write
 
@@ -125,24 +134,25 @@ func (t *T) Write(buf []byte) error {
 
 	binary.BigEndian.PutUint32(buf[0:4], uint32(t.capacity))
 	binary.BigEndian.PutUint32(buf[4:8], uint32(t.next))
-	binary.BigEndian.PutUint32(buf[8:12], uint32(len(t.entries)))
-	binary.BigEndian.PutUint16(buf[12:14], uint16(t.height))
+	binary.BigEndian.PutUint32(buf[8:12], uint32(t.pivot))
+	binary.BigEndian.PutUint32(buf[12:16], uint32(t.entries.len))
 
 	buf = buf[:nodeHeaderSize]
-	for _, ent := range t.entries {
+	t.entries.Iter(func(ent entry) bool {
 		hdr := ent.header()
 		buf = append(buf, hdr[:]...)
 		buf = append(buf, ent.readKey(t.buf)...)
 		buf = append(buf, ent.readValue(t.buf)...)
-	}
+		return true
+	})
 
 	return nil
 }
 
 // Reset returns the node to the initial new state.
 func (t *T) Reset() {
+	t.entries.reset()
 	t.buf = t.buf[:nodeHeaderSize]
-	t.entries = t.entries[:0]
 }
 
 var insertThunk mon.Thunk // timing info for Insert
@@ -156,9 +166,9 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 	// build the entry that we will insert.
 	ent := entry{
 		pivot:   0,
-		kindOff: kindInsert | int32(len(t.buf))<<8,
-		key:     int32(len(key)),
-		value:   int32(len(value)),
+		key:     uint32(len(key)),
+		value:   uint32(len(value)),
+		kindOff: kindInsert | uint32(len(t.buf))<<8,
 	}
 
 	// TODO(jeff): we can check to see if the entry already exists
@@ -167,6 +177,8 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 	// to remember to update the kindOff value. this could help out
 	// with reducing the number of flushes required for nodes that
 	// often see the same keys and values that don't increase.
+	// doing the insert into the b+tree already requires doing a
+	// search, anyway, so we should be able to piggyback on it.
 
 	// if we don't have the size to insert it, return false
 	// and wait for someone to flush us.
@@ -182,35 +194,10 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 	t.buf = append(t.buf, value...)
 
 	// insert it into the slice
-	t.insertEntry(key, ent)
+	t.entries.Insert(ent, t.buf)
 
 	timer.Stop()
 	return true
-}
-
-var insertSentinelThunk mon.Thunk // timing info for InsertSentinel
-
-// InsertSentinel adds the sentinel entry to the node.
-func (t *T) InsertSentinel(pivot uint32) {
-	timer := insertSentinelThunk.Start()
-
-	// TODO(jeff): should this be a flag on New?
-
-	ent := entry{
-		pivot:   pivot,
-		kindOff: kindSentinel | int32(len(t.buf))<<8,
-		key:     0,
-		value:   0,
-	}
-
-	hdr := ent.header()
-	t.buf = append(t.buf, hdr[:]...)
-
-	t.entries = append(t.entries, entry{})
-	copy(t.entries[1:], t.entries)
-	t.entries[0] = ent
-
-	timer.Stop()
 }
 
 var deleteThunk mon.Thunk // timing info for Delete
@@ -223,10 +210,12 @@ func (t *T) Delete(key []byte) (wrote bool) {
 
 	ent := entry{
 		pivot:   0,
-		kindOff: kindTombstone | int32(len(t.buf))<<8,
-		key:     int32(len(key)),
+		key:     uint32(len(key)),
 		value:   0,
+		kindOff: kindTombstone | uint32(len(t.buf))<<8,
 	}
+
+	// TODO(jeff): see comment about searching first in insert.
 
 	// if we don't have the size to insert it, return false
 	// and wait for someone to flush us.
@@ -241,48 +230,8 @@ func (t *T) Delete(key []byte) (wrote bool) {
 	t.buf = append(t.buf, key...)
 
 	// insert it into the slice
-	t.insertEntry(key, ent)
+	t.entries.Insert(ent, t.buf)
 
 	timer.Stop()
 	return true
-}
-
-var insertEntryThunk mon.Thunk // timing info for insertEntry
-
-// insertEntry binary searches the slice of entries and does
-// an insertion in the correct spot. Maybe there's a better
-// way to keep a sorted list, but this is what I've got.
-func (t *T) insertEntry(key []byte, ent entry) {
-	timer := insertEntryThunk.Start()
-
-	// TODO(jeff): Should we do special case checks for if the entry is either
-	// before every entry or after every entry? Those are O(1) and would maybe
-	// improve the sorted/reverse-sorted insert cases.
-
-	i, j := 0, len(t.entries)
-
-	for i < j {
-		h := int(uint(i+j) >> 1)
-		enth := t.entries[h]
-
-		if byte(enth.kindOff) == kindSentinel || // is this the -infinity node?
-			bytes.Compare(enth.readKey(t.buf), key) == -1 {
-
-			i = h + 1
-		} else {
-			j = h
-		}
-	}
-
-	if i >= len(t.entries) {
-		t.entries = append(t.entries, ent)
-	} else if bytes.Equal(t.entries[i].readKey(t.buf), key) {
-		t.entries[i] = ent
-	} else {
-		t.entries = append(t.entries, entry{})
-		copy(t.entries[i+1:], t.entries[i:])
-		t.entries[i] = ent
-	}
-
-	timer.Stop()
 }
