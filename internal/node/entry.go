@@ -46,9 +46,10 @@ func newEntry(pivot, key uint32, val uint64, offset uint32, kind uint8) entry {
 // readEntry returns an entry from the beginning of the buf given that
 // the buf is offset bytes in.
 func readEntry(offset uint32, buf []byte) (entry, bool) {
-	if len(buf) < entryHeaderSize {
+	if int64(len(buf)) < entryHeaderSize+int64(offset) {
 		return entry{}, false
 	}
+	buf = buf[offset:]
 	return entry{
 		pivot:   uint32(binary.BigEndian.Uint32(buf[0:4])),
 		keyVal:  uint64(binary.BigEndian.Uint64(buf[4:12])),

@@ -15,7 +15,6 @@ const (
 
 var (
 	numbers [][]byte
-	kilobuf = make([]byte, 4<<10)
 	gen     = pcg.New(uint64(time.Now().UnixNano()), 0)
 )
 

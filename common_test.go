@@ -79,7 +79,8 @@ func (m *memCache) writeBack(n *node.T, block uint32) error {
 		return nil
 	}
 
-	if err := n.Write(m.buf); err != nil {
+	var err error
+	if m.buf, err = n.Write(m.buf[:0]); err != nil {
 		return errs.Wrap(err)
 	} else if err := m.disk.Write(block, m.buf); err != nil {
 		return errs.Wrap(err)
@@ -141,10 +142,6 @@ func (m *memDisk) Delete(block uint32) error {
 }
 
 func (m *memDisk) Write(block uint32, data []byte) error {
-	if uint32(len(data)) != m.size {
-		return errs.New("bad block size")
-	}
-
 	m.blocks[block] = append([]byte(nil), data...)
 	if block > m.max {
 		m.max = block

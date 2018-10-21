@@ -40,7 +40,9 @@ func TestNode(t *testing.T) {
 				}
 			}
 
-			n2, err := Load(n1.Write(nil))
+			buf, err := n1.Write(nil)
+			assert.NoError(t, err)
+			n2, err := Load(buf)
 			assert.NoError(t, err)
 
 			var keys1 []string
@@ -94,7 +96,8 @@ func BenchmarkNode(b *testing.B) {
 
 	b.Run("Write", func(b *testing.B) {
 		run := func(b *testing.B, n *T) {
-			buf := n.Write(nil)
+			buf, err := n.Write(nil)
+			assert.NoError(b, err)
 
 			b.SetBytes(int64(len(buf)))
 			b.ReportAllocs()
@@ -114,7 +117,9 @@ func BenchmarkNode(b *testing.B) {
 			}
 			writes++
 		}
-		loaded, err := Load(fresh.Write(nil))
+		buf, err := fresh.Write(nil)
+		assert.NoError(b, err)
+		loaded, err := Load(buf)
 		assert.NoError(b, err)
 
 		if b.N == 1 {
@@ -137,7 +142,8 @@ func BenchmarkNode(b *testing.B) {
 			}
 			writes++
 		}
-		buf := n.Write(nil)
+		buf, err := n.Write(nil)
+		assert.NoError(b, err)
 
 		b.SetBytes(int64(len(buf)))
 		b.ReportAllocs()

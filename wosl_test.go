@@ -6,8 +6,10 @@ import (
 	"github.com/zeebo/wosl/internal/assert"
 )
 
+const blockSize = 1 << 20
+
 func TestWosl(t *testing.T) {
-	m := newMemCache(4 << 20)
+	m := newMemCache(blockSize)
 	sl, err := New(m)
 	assert.NoError(t, err)
 
@@ -28,13 +30,15 @@ func BenchmarkWosl(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				sl.Insert(numbers[i&numbersMask], v)
+				if err := sl.Insert(numbers[i&numbersMask], v); err != nil {
+					assert.NoError(b, err) // assert is expensive
+				}
 			}
 		}
 
 		b.Run("Memory", func(b *testing.B) {
-			b.Run("Large", func(b *testing.B) { run(b, newMemCache(4<<20), kilobuf) })
-			b.Run("Small", func(b *testing.B) { run(b, newMemCache(4<<20), kilobuf[:16]) })
+			b.Run("Large", func(b *testing.B) { run(b, newMemCache(blockSize), kilobuf) })
+			b.Run("Small", func(b *testing.B) { run(b, newMemCache(blockSize), kilobuf[:16]) })
 		})
 	})
 }

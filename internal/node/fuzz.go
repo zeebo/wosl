@@ -2,22 +2,22 @@
 
 package node
 
-import "encoding/binary"
-
 func Fuzz(data []byte) int {
 	// ensure it's large enough and that capacity is correct
 	if len(data) < nodeHeaderSize {
 		data = append(data, make([]byte, nodeHeaderSize-len(data))...)
 	}
-	binary.BigEndian.PutUint32(data[0:4], uint32(len(data)))
 
-	// limit entry count to 16k
-	data[8] = 0
-	data[9] = 0
-
-	_, err := Load(data)
+	n, err := Load(data)
 	if err != nil {
 		return 0
 	}
+
+	// walk all the entries
+	n.iter(func(ent entry, buf []byte) bool {
+		ent.readKey(buf)
+		return true
+	})
+
 	return 1
 }

@@ -82,7 +82,7 @@ func Load(buf []byte) (*T, error) {
 }
 
 // Length returns an upper bound on how many bytes writing the node would require.
-func (t *T) Length() uint32 { return uint32(len(t.buf)+len(t.cbuf)) + 4*t.Count() }
+func (t *T) Length() uint32 { return uint32(len(t.buf)+len(t.cbuf)) + 4*uint32(t.entries.len) }
 
 // Count returns how many entries are in the node.
 func (t *T) Count() uint32 { return uint32(t.entries.len) + t.count }
@@ -111,7 +111,7 @@ func (t *T) Sully() { t.dirty = true }
 var writeThunk mon.Thunk // timing info for Write
 
 // Write marshals the node to the provided buffer, appending to it.
-func (t *T) Write(buf []byte) []byte {
+func (t *T) Write(buf []byte) ([]byte, error) {
 	timer := writeThunk.Start()
 
 	if len := int64(t.Length()); int64(cap(buf)) < len {
@@ -130,7 +130,7 @@ func (t *T) Write(buf []byte) []byte {
 	offset := len(buf)
 	buf = buf[:int64(len(buf))+int64(4*count)]
 
-	t.iter(func(ent entry, ebuf []byte) bool {
+	err := t.iter(func(ent entry, ebuf []byte) bool {
 		// write a table entry for where the entry lives
 		start := uint32(len(buf))
 		binary.BigEndian.PutUint32(buf[offset:], start)
@@ -142,11 +142,14 @@ func (t *T) Write(buf []byte) []byte {
 		buf = append(buf, ent.readKey(ebuf)...)
 		return true
 	})
+	if err != nil {
+		return nil, Error.Wrap(err)
+	}
 
 	t.dirty = false
 
 	timer.Stop()
-	return buf
+	return buf, nil
 }
 
 // Reset returns the node to the initial new state.
@@ -157,6 +160,13 @@ func (t *T) Reset() {
 	t.dirty = false
 }
 
+// Fits returns if a write for the given key would fit in size.
+func (t *T) Fits(key []byte, size uint32) bool {
+	return len(key) <= keyMask &&
+		entryHeaderSize+int64(len(key))+4 < int64(size) &&
+		t.Count() < math.MaxUint32
+}
+
 var insertThunk mon.Thunk // timing info for Insert
 
 // Insert associates the key with the value in the node. If wrote is
@@ -165,20 +175,14 @@ var insertThunk mon.Thunk // timing info for Insert
 func (t *T) Insert(key []byte, value uint64) (wrote bool) {
 	timer := insertThunk.Start()
 
-	// if the key or value are too large, give up.
-	if len(key) > keyMask || value > valueMask {
+	// make sure the write is ok to go
+	if value > valueMask || !t.Fits(key, math.MaxUint32) {
 		timer.Stop()
 		return false
 	}
 
 	// build the entry that we will insert.
 	ent := newEntry(0, uint32(len(key)), value, uint32(len(t.buf)), kindInsert)
-
-	// if we'd go over a uint32, give up
-	if int64(t.Length())+(4+ent.size()) > math.MaxUint32 || t.Count() == math.MaxUint32 {
-		timer.Stop()
-		return false
-	}
 
 	// add the entry to the buffer
 	hdr := ent.header()
@@ -201,20 +205,14 @@ var deleteThunk mon.Thunk // timing info for Delete
 func (t *T) Delete(key []byte) (wrote bool) {
 	timer := deleteThunk.Start()
 
-	// if the key is too large, give up.
-	if len(key) > keyMask {
+	// make sure the write is ok to go
+	if !t.Fits(key, math.MaxUint32) {
 		timer.Stop()
 		return false
 	}
 
 	// build the entry that we will insert.
 	ent := newEntry(0, uint32(len(key)), 0, uint32(len(t.buf)), kindTombstone)
-
-	// if we'd go over a uint32, give up
-	if int64(t.Length())+(4+ent.size()) > math.MaxUint32 || t.Count() == math.MaxUint32 {
-		timer.Stop()
-		return false
-	}
 
 	// add the entry to the buffer
 	hdr := ent.header()
@@ -230,12 +228,13 @@ func (t *T) Delete(key []byte) (wrote bool) {
 }
 
 // iter does a merged iteration over cbuf and t.entries.
-func (t *T) iter(cb func(ent entry, buf []byte) bool) {
+func (t *T) iter(cb func(ent entry, buf []byte) bool) error {
 	var (
 		offset uint32 = nodeHeaderSize // offset into cbuf
 		i      uint32                  // index into count
 		ckey   []byte                  // current key from cbuf
 		cent   entry
+		err    error
 	)
 
 	// merge cbuf along with the btree
@@ -247,7 +246,14 @@ func (t *T) iter(cb func(ent entry, buf []byte) bool) {
 		for {
 			if ckey == nil {
 				eoff := binary.BigEndian.Uint32(t.cbuf[offset:])
-				cent, _ = readEntry(eoff, t.cbuf[eoff:])
+
+				var ok bool
+				cent, ok = readEntry(eoff, t.cbuf)
+				if !ok {
+					err = Error.New("invalid loaded entry buffer")
+					return false
+				}
+
 				ckey = cent.readKey(t.cbuf)
 			}
 
@@ -271,11 +277,14 @@ func (t *T) iter(cb func(ent entry, buf []byte) bool) {
 			}
 		}
 	})
+	if err != nil {
+		return err
+	}
 
 	// send one off if we already loaded it
 	if ckey != nil {
 		if !cb(cent, t.cbuf) {
-			return
+			return nil
 		}
 		i, offset = i+1, offset+4
 	}
@@ -283,26 +292,34 @@ func (t *T) iter(cb func(ent entry, buf []byte) bool) {
 	// finish off the cbuf
 	for ; i < t.count; i, offset = i+1, offset+4 {
 		eoff := binary.BigEndian.Uint32(t.cbuf[offset:])
-		ent, _ := readEntry(eoff, t.cbuf[eoff:])
-		if !cb(ent, t.cbuf) {
-			return
+		ent, ok := readEntry(eoff, t.cbuf)
+		if !ok {
+			return Error.New("invalid loaded entry buffer")
+		} else if !cb(ent, t.cbuf) {
+			return nil
 		}
 	}
+
+	return nil
 }
 
 // IterKeys iterates over all of the entries in the node, but only returning the key and
 // the pivot. The pivot returned by the callback is stored as the entries pivot if the
 // error is nil. Returns any error from the callback.
 func (t *T) IterKeys(cb func(key []byte, pivot uint32) (uint32, error)) error {
-	var err error
-	t.iter(func(ent entry, buf []byte) bool {
+	var uerr error
+	err := t.iter(func(ent entry, buf []byte) bool {
 		var npivot uint32
-		npivot, err = cb(ent.readKey(buf), ent.pivot)
-		if err != nil {
+		npivot, uerr = cb(ent.readKey(buf), ent.pivot)
+		if uerr != nil {
 			return false
 		}
+
 		ent.pivot = npivot
 		return true
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	return uerr
 }

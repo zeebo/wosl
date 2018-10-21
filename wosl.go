@@ -47,13 +47,13 @@ func New(cache Cache) (*T, error) {
 // every call that uses the same backing store.
 func NewEps(eps float64, cache Cache) (*T, error) {
 	disk := cache.Disk()
-	b := disk.BlockSize()
 	maxBlock, err := disk.MaxBlock()
 	if err != nil {
 		return nil, Error.Wrap(err)
 	}
 
 	// precompute some ratios for getting the height
+	b := disk.BlockSize()
 	beps := math.Pow(float64(b), eps)
 	bneps := math.Pow(float64(b), 1-eps)
 	rBeps := uint32(float64(math.MaxUint32) / beps)
@@ -64,7 +64,7 @@ func NewEps(eps float64, cache Cache) (*T, error) {
 	if buf, err := disk.Read(rootBlock); err != nil {
 		return nil, Error.Wrap(err)
 	} else if buf == nil {
-		root = node.New(b, 0, 1)
+		root = node.New(0, 1)
 		root.SetPivot(invalidBlock)
 	} else if root, err = node.Load(buf); err != nil {
 		return nil, Error.Wrap(err)
@@ -97,6 +97,11 @@ var insertThunk mon.Thunk // timing for Insert
 func (t *T) Insert(key, value []byte) error {
 	timer := insertThunk.Start()
 
+	// TODO(jeff): log ahead the values into some journal per block.
+	// or something. somewhere needs to handle it. for now, just
+	// record the hash of the value lol.
+	val := xxhash.Sum64(value) >> 20
+
 	// Compute the height for the key to check if we need to allocate
 	// new roots. This should be exceedinly rare, so it's ok if it's
 	// slightly inefficient.
@@ -109,7 +114,7 @@ func (t *T) Insert(key, value []byte) error {
 	}
 
 	// do a recursive/flushing insert of the key starting at the root.
-	if _, err := t.insert(t.root, rootBlock, key, value); err != nil {
+	if _, err := t.insert(t.root, rootBlock, key, val); err != nil {
 		timer.Stop()
 		return Error.Wrap(err)
 	}
@@ -126,7 +131,7 @@ func (t *T) newRoot() error {
 		return Error.Wrap(err)
 	}
 
-	t.root = node.New(t.b, 0, t.root.Height()+1)
+	t.root = node.New(0, t.root.Height()+1)
 	t.root.SetPivot(block)
 	return nil
 }
@@ -144,7 +149,8 @@ func (t *T) writeNewNode(n *node.T) (uint32, error) {
 
 // writeNode saves the node to the given block.
 func (t *T) writeNode(n *node.T, block uint32) error {
-	if err := n.Write(t.scratch); err != nil {
+	var err error
+	if t.scratch, err = n.Write(t.scratch[:0]); err != nil {
 		return Error.Wrap(err)
 	} else if err := t.disk.Write(block, t.scratch); err != nil {
 		return Error.Wrap(err)
@@ -154,9 +160,9 @@ func (t *T) writeNode(n *node.T, block uint32) error {
 
 // insert places the key/value into the node at the given block. If the node does not
 // contain enough space, it is flushed, recursively inserting elements into its children.
-func (t *T) insert(n *node.T, block uint32, key, value []byte) (bool, error) {
-	// if it inserts cleanly, we're done.
-	if n.Insert(key, value) {
+func (t *T) insert(n *node.T, block uint32, key []byte, val uint64) (bool, error) {
+	// if we're smaller than the
+	if n.Fits(key, t.b) && n.Insert(key, val) {
 		return false, nil
 	}
 
@@ -166,9 +172,12 @@ func (t *T) insert(n *node.T, block uint32, key, value []byte) (bool, error) {
 		return true, nil
 	}
 
-	// we have to flush the root. first write back all of the dirty data.
 	// TODO(jeff): have to be VERY careful about concurrency here. for now
-	// assume everything is serialized behind a mutex.
+	// assume everything is serialized behind a mutex. there also may be
+	// some ways to flush less. gotta figure that one out. it also may be
+	// better to flush AFTER the insertion. gotta figure that out, too.
+
+	// we have to flush the root. first write back all of the dirty data.
 	if n == t.root {
 		if err := t.cache.Flush(); err != nil {
 			return false, Error.Wrap(err)
@@ -178,7 +187,7 @@ func (t *T) insert(n *node.T, block uint32, key, value []byte) (bool, error) {
 	// otherwise, flush and attempt another insert.
 	if err := t.flush(n, block); err != nil {
 		return false, Error.Wrap(err)
-	} else if !n.Insert(key, value) {
+	} else if !n.Insert(key, val) {
 		return false, Error.New("entry too large to fit")
 	} else {
 		return false, nil
@@ -200,7 +209,7 @@ func (t *T) flush(n *node.T, block uint32) error {
 	// in the cache to be written back if dirtied.
 	if n.Pivot() == invalidBlock {
 		block := t.maxBlock + 1
-		t.cache.Add(node.New(t.b, 0, 0), block)
+		t.cache.Add(node.New(0, 0), block)
 		n.SetPivot(block)
 		t.maxBlock++
 	}
