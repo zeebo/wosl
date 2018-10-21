@@ -9,7 +9,7 @@ import (
 
 const (
 	invalidNode    = math.MaxUint32
-	payloadEntries = 127
+	payloadEntries = 31
 	payloadSplit   = payloadEntries / 2
 )
 
@@ -76,7 +76,6 @@ func (b *btree) reset() {
 func (b *btree) search(key, buf []byte) (*btreeNode, uint32) {
 	n, nid := b.root, b.rid
 
-search:
 	for !n.leaf {
 		// binary search to find the appropriate child
 		i, j := uint8(0), n.count
@@ -84,14 +83,9 @@ search:
 			h := (i + j) >> 1
 			enth := n.payload[h]
 			kh := enth.readKey(buf)
-			switch bytes.Compare(key, kh) {
-			case 1:
+			if bytes.Compare(key, kh) >= 0 {
 				i = h + 1
-			case 0: // found a match. quick exit
-				nid = enth.pivot
-				n = b.nodes[nid]
-				continue search
-			case -1:
+			} else {
 				j = h
 			}
 		}

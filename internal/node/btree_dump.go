@@ -2,7 +2,7 @@ package node
 
 import "fmt"
 
-const dumpLeaf = false
+const dumpLeaf = true
 
 // dump constructs a dot graph of the btree
 func dump(b *btree, buf []byte) {

@@ -52,3 +52,22 @@ func TestBtreeBulk(t *testing.T) {
 		})
 	})
 }
+
+func BenchmarkBtreeBulk(b *testing.B) {
+	b.Run("Basic", func(b *testing.B) {
+		var buf []byte
+
+		ents := make([]entry, b.N)
+		for i := range ents {
+			ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), 0)
+		}
+
+		var bu btreeBulk
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			bu.append(ents[i])
+		}
+	})
+}

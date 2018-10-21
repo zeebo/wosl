@@ -41,8 +41,8 @@ func TestBtree(t *testing.T) {
 		var buf []byte
 		var bt btree
 
-		for i := 0; i < 10000; i++ {
-			d := string(numbers[rand.Intn(numbersSize)&numbersSize])
+		for i := 0; i < 100000; i++ {
+			d := string(numbers[gen.Intn(numbersSize)&numbersMask])
 			set[d] = true
 			bt.Insert(appendEntry(&buf, d, 0))
 		}
@@ -66,8 +66,8 @@ func TestBtree(t *testing.T) {
 		var buf []byte
 		var bt btree
 
-		for i := 0; i < 10000; i++ {
-			d := string(numbers[rand.Intn(numbersSize)&numbersSize])
+		for i := 0; i < 100000; i++ {
+			d := string(numbers[gen.Intn(numbersSize)&numbersMask])
 			set[d] = true
 			ent, _ := appendEntry(&buf, d, 0)
 			entries = append(entries, ent)
@@ -92,23 +92,79 @@ func TestBtree(t *testing.T) {
 		})
 	})
 
-	t.Run("Bug_One", func(t *testing.T) {
+	t.Run("Bugs", func(t *testing.T) {
 		if payloadEntries != 3 {
 			t.Skip("Test requires payloadEntries to be 3")
 		}
 
+		t.Run("One", func(t *testing.T) {
+			var buf []byte
+			var bt btree
+
+			bt.Insert(appendEntry(&buf, "A", 0))
+			bt.Insert(appendEntry(&buf, "F", 0))
+			bt.Insert(appendEntry(&buf, "D", 0))
+			bt.Insert(appendEntry(&buf, "C", 0))
+			bt.Insert(appendEntry(&buf, "E", 0))
+			bt.Insert(appendEntry(&buf, "G", 0))
+			bt.Insert(appendEntry(&buf, "B", 0))
+			bt.Insert(appendEntry(&buf, "A", 0))
+
+			assert.Equal(t, bt.len, 7)
+		})
+
+		t.Run("Two", func(t *testing.T) {
+			var buf []byte
+			var bt btree
+
+			bt.Insert(appendEntry(&buf, "A", 0))
+			bt.Insert(appendEntry(&buf, "F", 0))
+			bt.Insert(appendEntry(&buf, "D", 0))
+			bt.Insert(appendEntry(&buf, "D", 0))
+			bt.Insert(appendEntry(&buf, "C", 0))
+			bt.Insert(appendEntry(&buf, "A", 0))
+			bt.Insert(appendEntry(&buf, "C", 0))
+			bt.Insert(appendEntry(&buf, "E", 0))
+			bt.Insert(appendEntry(&buf, "B", 0))
+
+			assert.Equal(t, bt.len, 6)
+		})
+	})
+}
+
+func BenchmarkBtree(b *testing.B) {
+	b.Run("Sorted", func(b *testing.B) {
 		var buf []byte
+
+		ents := make([]entry, b.N)
+		for i := range ents {
+			ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), 0)
+		}
+
 		var bt btree
+		b.ReportAllocs()
+		b.ResetTimer()
 
-		bt.Insert(appendEntry(&buf, "A", 0))
-		bt.Insert(appendEntry(&buf, "F", 0))
-		bt.Insert(appendEntry(&buf, "D", 0))
-		bt.Insert(appendEntry(&buf, "C", 0))
-		bt.Insert(appendEntry(&buf, "E", 0))
-		bt.Insert(appendEntry(&buf, "G", 0))
-		bt.Insert(appendEntry(&buf, "B", 0))
-		bt.Insert(appendEntry(&buf, "A", 0))
+		for i := 0; i < b.N; i++ {
+			bt.Insert(ents[i], buf)
+		}
+	})
 
-		assert.Equal(t, bt.len, 7)
+	b.Run("Random", func(b *testing.B) {
+		var buf []byte
+
+		ents := make([]entry, b.N)
+		for i := range ents {
+			key := string(numbers[gen.Intn(numbersSize)&numbersMask])
+			ents[i], _ = appendEntry(&buf, key, 0)
+		}
+
+		var bt btree
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			bt.Insert(ents[i], buf)
+		}
 	})
 }
