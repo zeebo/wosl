@@ -3,6 +3,8 @@ package node
 import (
 	"bytes"
 	"math"
+
+	"github.com/zeebo/wosl/internal/mon"
 )
 
 const (
@@ -116,9 +118,13 @@ func (b *btree) alloc(leaf bool) (*btreeNode, uint32) {
 	return n, uint32(len(b.nodes) - 1)
 }
 
+var splitThunk mon.Thunk
+
 // split the node in half, returning a new node containing the
 // smaller half of the keys.
 func (b *btree) split(n *btreeNode, nid uint32) (*btreeNode, uint32) {
+	timer := splitThunk.Start()
+
 	s, sid := b.alloc(n.leaf)
 	s.parent = n.parent
 
@@ -151,6 +157,7 @@ func (b *btree) split(n *btreeNode, nid uint32) (*btreeNode, uint32) {
 	}
 	n.count = uint8(copy(n.payload[:], n.payload[copyAt:]))
 
+	timer.Stop()
 	return s, sid
 }
 
@@ -260,7 +267,7 @@ func (b *btree) append(n *btreeNode, nid uint32, ent entry) {
 }
 
 // Iter calls the callback with all of the entries in order.
-func (b *btree) Iter(cb func(ent entry) bool) {
+func (b *btree) Iter(cb func(ent *entry) bool) {
 	n := b.root
 	if b.root == nil {
 		return
@@ -276,7 +283,7 @@ func (b *btree) Iter(cb func(ent entry) bool) {
 
 	for {
 		for i := uint8(0); i < n.count; i++ {
-			if !cb(n.payload[i]) {
+			if !cb(&n.payload[i]) {
 				return
 			}
 		}

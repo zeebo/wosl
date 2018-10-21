@@ -5,170 +5,243 @@ import (
 
 	"github.com/cespare/xxhash"
 	"github.com/zeebo/errs"
+	"github.com/zeebo/wosl/internal/debug"
+	"github.com/zeebo/wosl/internal/mon"
 	"github.com/zeebo/wosl/internal/node"
+	"github.com/zeebo/wosl/lease"
 )
 
 var Error = errs.Class("wosl")
 
-const rootBlock uint32 = 1
+const (
+	noBlock      uint32 = 0
+	rootBlock    uint32 = 1
+	invalidBlock uint32 = math.MaxUint32
+)
 
 // T is a write-optimized skip list. It is not thread safe.
 type T struct {
-	eps      float64
-	disk     Disk
-	roots    []*node.T // roots[0] is the lowest level
-	maxBlock uint32
+	eps     float64
+	cache   Cache
+	disk    Disk
+	root    *node.T
+	scratch []byte
 
-	b      int32  // block size from disk
-	beps   uint32 // b^eps
-	bneps  uint32 // b^(1 - eps)
-	rBeps  uint32 // used for height calculation. expresses 1 / B^eps
-	rBneps uint32 // used for height calculation. expresses 1 / B^(1 - eps)
+	maxBlock uint32 // largest stored block from disk
+	b        uint32 // block size from disk
+	beps     uint32 // b^eps
+	bneps    uint32 // b^(1 - eps)
+	rBeps    uint32 // used for height calculation. expresses 1 / B^eps
+	rBneps   uint32 // used for height calculation. expresses 1 / B^(1 - eps)
 }
 
-// New returns a write-optmized skip list that uses the disk for reads and writes.
+// New returns a write-optimized skip list that uses the cache for reads and writes.
+// It uses an epsilon of 0.5, providing a balance between write and query performance
+// such that queries are like a B-tree, and writes are much faster.
+func New(cache Cache) (*T, error) {
+	return NewEps(0.5, cache)
+}
+
+// NewEps returns a write-optimized skip list that uses the cache for reads and writes.
 // The passed in epsilon argument must obey 0 < eps < 1, and must be the same for
-// every call using the same disk.
-func New(eps float64, disk Disk) (*T, error) {
+// every call that uses the same backing store.
+func NewEps(eps float64, cache Cache) (*T, error) {
+	disk := cache.Disk()
 	b := disk.BlockSize()
-	beps := math.Pow(float64(b), eps)
-	bneps := math.Pow(float64(b), 1-eps)
-	rBeps := uint32(float64(math.MaxUint32) / beps)
-	rBneps := uint32(float64(math.MaxUint32) / bneps)
-
-	roots, err := loadRoots(disk)
-	if err != nil {
-		return nil, Error.Wrap(err)
-	}
-	if len(roots) == 0 { // first run gets a new node
-		roots = []*node.T{node.New(b, 0)}
-	}
-
 	maxBlock, err := disk.MaxBlock()
 	if err != nil {
 		return nil, Error.Wrap(err)
 	}
 
-	return &T{
-		eps:      eps,
-		disk:     disk,
-		roots:    roots,
-		maxBlock: maxBlock,
+	// precompute some ratios for getting the height
+	beps := math.Pow(float64(b), eps)
+	bneps := math.Pow(float64(b), 1-eps)
+	rBeps := uint32(float64(math.MaxUint32) / beps)
+	rBneps := uint32(float64(math.MaxUint32) / bneps)
 
-		b:      b,
-		beps:   uint32(beps),
-		bneps:  uint32(bneps),
-		rBeps:  rBeps,
-		rBneps: rBneps,
+	// load or create the root node
+	var root *node.T
+	if buf, err := disk.Read(rootBlock); err != nil {
+		return nil, Error.Wrap(err)
+	} else if buf == nil {
+		root = node.New(b, 0, 1)
+		root.SetPivot(invalidBlock)
+	} else if root, err = node.Load(buf); err != nil {
+		return nil, Error.Wrap(err)
+	}
+
+	return &T{
+		eps:     eps,
+		cache:   cache,
+		disk:    disk,
+		root:    root,
+		scratch: make([]byte, b),
+
+		maxBlock: maxBlock,
+		b:        b,
+		beps:     uint32(beps),
+		bneps:    uint32(bneps),
+		rBeps:    rBeps,
+		rBneps:   rBneps,
 	}, nil
 }
 
-// loadRoots loads the roots slice from the disk. It starts at the highest
-// root entry (at the rootBlock index), and follows its pivot entry until
-// the last one which has a zero pivot.
-func loadRoots(disk Disk) ([]*node.T, error) {
-	var roots []*node.T
-
-	for block := rootBlock; block != 0; {
-		buf, err := disk.Read(block)
-		if err != nil {
-			return nil, Error.Wrap(err)
-		}
-
-		if buf == nil {
-			if block == 1 {
-				break
-			}
-			return nil, Error.New("invalid pivot in root structure")
-		}
-
-		n, err := node.Load(buf)
-		if err != nil {
-			return nil, Error.Wrap(err)
-		}
-
-		roots = append(roots, n)
-		block = n.Pivot()
-	}
-
-	// reverse so that roots[0] has the lowest height
-	for i, j := 0, len(roots)-1; i < j; i, j = i+1, j-1 {
-		roots[i], roots[j] = roots[j], roots[i]
-	}
-
-	return roots, nil
+// height returns the height of the key.
+func (t *T) height(key []byte) uint32 {
+	return height(xxhash.Sum64(key), t.rBneps, t.rBeps)
 }
+
+var insertThunk mon.Thunk // timing for Insert
 
 // Insert associates value with key in the skip list.
 func (t *T) Insert(key, value []byte) error {
-	// Compute the height for the key. It's important to realize that with
-	// a block size of 4MB, and an eps of 0.5, then we expect the height of
-	// the key to follow 1 / (2048 ^ h), so we can essentially be sure that
-	// every key is in [0, 1, 2], and should optimize heavily for lower
-	// heights being common.
-	h := height(xxhash.Sum64(key), t.rBneps, t.rBeps)
+	timer := insertThunk.Start()
 
-	for h > int16(len(t.roots)-1) {
-		// TODO(jeff): This should not be a for loop. That makes the
-		// write problem described below EVEN WORSE! But, since this
-		// is super rare, and this is the easiest way to make sure
-		// it's correct, we tolerate it. Probably forever.
-
-		// We need to allocate a new root. Since we know no one points into
-		// the root, we just need to write the current root out as a new
-		// node, allocate a new node with the new max height, and write it
-		// out as block 1.
-		buf := make([]byte, t.b)
-		t.maxBlock++
-		newBlock := t.maxBlock
-		highest := t.roots[len(t.roots)-1]
-
-		// TODO(jeff): the writes here are particularly egregious. specifically
-		// the second one is writing approximately no data, but passes the
-		// entire block off to the disk. it'd be nice to signal that we didn't
-		// actually need all of that data. additionally, it doesn't even zero
-		// it, so it's not going to be sparse, either.
-
-		// First write out the highest node to a new block
-		if err := highest.Write(buf); err != nil {
+	// Compute the height for the key to check if we need to allocate
+	// new roots. This should be exceedinly rare, so it's ok if it's
+	// slightly inefficient.
+	h := t.height(key)
+	for h >= t.root.Height() {
+		if err := t.newRoot(); err != nil {
+			timer.Stop()
 			return Error.Wrap(err)
 		}
-		if err := t.disk.Write(newBlock, buf); err != nil {
-			return Error.Wrap(err)
-		}
-
-		// Allocate a new root and make the pivot point to the old root.
-		root := node.New(t.b, 0)
-		root.SetPivot(newBlock)
-
-		// Write out the new root.
-		if err := root.Write(buf); err != nil {
-			return Error.Wrap(err)
-		}
-		if err := t.disk.Write(rootBlock, buf); err != nil {
-			return Error.Wrap(err)
-		}
-
-		t.roots = append(t.roots, root)
 	}
 
-	// TODO(jeff): need to do some sort of LRU or something around nodes
-	// rather than their buffers, since we spend time deserializing them.
-	// The only part that's expensive is loading the entries slice. Maybe
-	// we can either not do that during a load (either bloat the format
-	// to add a uint32 pointer for each entry for O(1) seeks to the nth
-	// entry or just keep every entry in memory?) and maybe just request
-	// the buf from the disk every time?
-
-	n := t.roots[h]
-	if !n.Insert(key, value) {
-		// TODO(jeff): Flush the node to the appropriate nodes.
-		// just reset for now so that we can get some benchmarks.
-		n.Reset()
-		n.Insert(key, value)
+	// do a recursive/flushing insert of the key starting at the root.
+	if _, err := t.insert(t.root, rootBlock, key, value); err != nil {
+		timer.Stop()
+		return Error.Wrap(err)
 	}
 
+	timer.Stop()
 	return nil
+}
+
+// newRoot allocates and writes out a new root to the rootBlock, having it
+// point to the current root (which is written to some other new block).
+func (t *T) newRoot() error {
+	block, err := t.writeNewNode(t.root)
+	if err != nil {
+		return Error.Wrap(err)
+	}
+
+	t.root = node.New(t.b, 0, t.root.Height()+1)
+	t.root.SetPivot(block)
+	return nil
+}
+
+// writeNewNode saves the node to disk and returns the block number
+// it was written with.
+func (t *T) writeNewNode(n *node.T) (uint32, error) {
+	block := t.maxBlock + 1
+	if err := t.writeNode(n, block); err != nil {
+		return 0, Error.Wrap(err)
+	}
+	t.maxBlock = block
+	return block, nil
+}
+
+// writeNode saves the node to the given block.
+func (t *T) writeNode(n *node.T, block uint32) error {
+	if err := n.Write(t.scratch); err != nil {
+		return Error.Wrap(err)
+	} else if err := t.disk.Write(block, t.scratch); err != nil {
+		return Error.Wrap(err)
+	}
+	return nil
+}
+
+// insert places the key/value into the node at the given block. If the node does not
+// contain enough space, it is flushed, recursively inserting elements into its children.
+func (t *T) insert(n *node.T, block uint32, key, value []byte) (bool, error) {
+	// if it inserts cleanly, we're done.
+	if n.Insert(key, value) {
+		return false, nil
+	}
+
+	// if we're a leaf the parent calling insert needs to handle the
+	// flush specially.
+	if n.Height() == 0 {
+		return true, nil
+	}
+
+	// we have to flush the root. first write back all of the dirty data.
+	// TODO(jeff): have to be VERY careful about concurrency here. for now
+	// assume everything is serialized behind a mutex.
+	if n == t.root {
+		if err := t.cache.Flush(); err != nil {
+			return false, Error.Wrap(err)
+		}
+	}
+
+	// otherwise, flush and attempt another insert.
+	if err := t.flush(n, block); err != nil {
+		return false, Error.Wrap(err)
+	} else if !n.Insert(key, value) {
+		return false, Error.New("entry too large to fit")
+	} else {
+		return false, nil
+	}
+}
+
+var flushThunk mon.Thunk // timing for flush
+
+// flush distributes the elements of the node's buffer among the
+// buffers of the node's children. It should not be called on leaves.
+func (t *T) flush(n *node.T, block uint32) error {
+	timer := flushThunk.Start()
+
+	// assert that we don't flush a leaf node.
+	debug.Assert("flush leaf node", func() bool { return n.Height() != 0 })
+
+	// special case: is this the root node at height 1, and there's
+	// no leaf for it yet? if so, allocate a leaf node and put it
+	// in the cache to be written back if dirtied.
+	if n.Pivot() == invalidBlock {
+		block := t.maxBlock + 1
+		t.cache.Add(node.New(t.b, 0, 0), block)
+		n.SetPivot(block)
+		t.maxBlock++
+	}
+
+	// TODO(jeff): is it worthwhile to have entries pack in the height
+	// of the key so that we don't have to recompute it? we're going to
+	// be reading the key anyway, and computing the hash is like
+	// nanoseconds, so it won't matter. maybe it does!?
+
+	var ( // state for the iteration
+		le    lease.T
+		child = n.Pivot()
+		nh    = n.Height()
+	)
+
+	err := n.IterKeys(func(key []byte, pivot uint32) (uint32, error) {
+		// update which child node we will insert the entry into
+		if pivot != 0 && child != pivot {
+			le.Close()
+			child = pivot
+		}
+		if le.Zero() {
+			var err error
+			le, err = t.cache.Get(child)
+			if err != nil {
+				return 0, Error.Wrap(err)
+			}
+		}
+
+		// insert the entry into the
+		h := t.height(key)
+		if nh <= h { // make this entry a pivot for the child
+			pivot = child
+		}
+
+		return pivot, nil
+	})
+	le.Close()
+
+	timer.Stop()
+	return Error.Wrap(err)
 }
 
 // Read returns the data for k if it exists. Otherwise, it returns nil. It is

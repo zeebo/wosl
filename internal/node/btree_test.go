@@ -22,7 +22,7 @@ func TestBtree(t *testing.T) {
 				key = fmt.Sprint(gen.Uint32())
 			}
 
-			ent, bu := newEntry(&buf, key, "")
+			ent, bu := appendEntry(&buf, key, 0)
 			n.insertEntry(ent.readKey(buf), ent, bu)
 
 			keys = append(keys, key)
@@ -44,13 +44,13 @@ func TestBtree(t *testing.T) {
 		for i := 0; i < 10000; i++ {
 			d := string(numbers[rand.Intn(numbersSize)&numbersSize])
 			set[d] = true
-			bt.Insert(newEntry(&buf, d, "v"))
+			bt.Insert(appendEntry(&buf, d, 0))
 		}
 
 		assert.Equal(t, bt.len, len(set))
 
 		last := ""
-		bt.Iter(func(ent entry) bool {
+		bt.Iter(func(ent *entry) bool {
 			key := string(ent.readKey(buf))
 			assert.That(t, last < key)
 			assert.That(t, set[key])
@@ -69,7 +69,7 @@ func TestBtree(t *testing.T) {
 		for i := 0; i < 10000; i++ {
 			d := string(numbers[rand.Intn(numbersSize)&numbersSize])
 			set[d] = true
-			ent, _ := newEntry(&buf, d, "v")
+			ent, _ := appendEntry(&buf, d, 0)
 			entries = append(entries, ent)
 		}
 		rand.Shuffle(len(entries), func(i, j int) {
@@ -82,7 +82,7 @@ func TestBtree(t *testing.T) {
 		assert.Equal(t, bt.len, len(set))
 
 		last := ""
-		bt.Iter(func(ent entry) bool {
+		bt.Iter(func(ent *entry) bool {
 			key := string(ent.readKey(buf))
 			assert.That(t, last < key)
 			assert.That(t, set[key])
@@ -100,14 +100,14 @@ func TestBtree(t *testing.T) {
 		var buf []byte
 		var bt btree
 
-		bt.Insert(newEntry(&buf, "A", ""))
-		bt.Insert(newEntry(&buf, "F", ""))
-		bt.Insert(newEntry(&buf, "D", ""))
-		bt.Insert(newEntry(&buf, "C", ""))
-		bt.Insert(newEntry(&buf, "E", ""))
-		bt.Insert(newEntry(&buf, "G", ""))
-		bt.Insert(newEntry(&buf, "B", ""))
-		bt.Insert(newEntry(&buf, "A", ""))
+		bt.Insert(appendEntry(&buf, "A", 0))
+		bt.Insert(appendEntry(&buf, "F", 0))
+		bt.Insert(appendEntry(&buf, "D", 0))
+		bt.Insert(appendEntry(&buf, "C", 0))
+		bt.Insert(appendEntry(&buf, "E", 0))
+		bt.Insert(appendEntry(&buf, "G", 0))
+		bt.Insert(appendEntry(&buf, "B", 0))
+		bt.Insert(appendEntry(&buf, "A", 0))
 
 		assert.Equal(t, bt.len, 7)
 	})

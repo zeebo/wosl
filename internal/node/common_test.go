@@ -26,17 +26,10 @@ func init() {
 	}
 }
 
-func newEntry(buf *[]byte, key, value string) (entry, []byte) {
-	ent := entry{
-		key:     uint32(len(key)),
-		value:   uint32(len(value)),
-		kindOff: uint32(len(*buf)) << 8,
-	}
-
+func appendEntry(buf *[]byte, key string, value uint64) (entry, []byte) {
+	ent := newEntry(0, uint32(len(key)), value, uint32(len(*buf)), kindInsert)
 	hdr := ent.header()
 	*buf = append(*buf, hdr[:]...)
 	*buf = append(*buf, key...)
-	*buf = append(*buf, value...)
-
 	return ent, []byte(*buf)
 }

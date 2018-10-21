@@ -34,7 +34,7 @@ func dump(b *btree, buf []byte) {
 			for i := uint8(0); i < n.count; i++ {
 				fmt.Printf(`<TD PORT="f%d">%s`, i, n.payload[i].readKey(buf))
 				if n.leaf {
-					fmt.Printf(`:%s`, n.payload[i].readValue(buf))
+					fmt.Printf(`:%d`, n.payload[i].value())
 				}
 				fmt.Printf(`</TD>`)
 			}
