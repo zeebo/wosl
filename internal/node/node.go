@@ -152,12 +152,20 @@ func (t *T) Write(buf []byte) ([]byte, error) {
 	return buf, nil
 }
 
-// Reset returns the node to the initial new state.
+// Reset returns the node to the initial new state, even if it was
+// created from a call to Load.
 func (t *T) Reset() {
+	// TODO(jeff): we have to clear cbuf in order to make the
+	// Length call return the right results, which means we
+	// cant use it to figure out which mmap region to unmap
+	// later. Just pointing this out in case that ends up
+	// being a leak/bug.
+
 	t.buf = t.buf[:nodeHeaderSize]
 	t.entries.reset()
-	t.pivot = 0
 	t.dirty = false
+	t.count = 0
+	t.cbuf = nil
 }
 
 // Fits returns if a write for the given key would fit in size.
@@ -303,23 +311,47 @@ func (t *T) iter(cb func(ent entry, buf []byte) bool) error {
 	return nil
 }
 
-// IterKeys iterates over all of the entries in the node, but only returning the key and
-// the pivot. The pivot returned by the callback is stored as the entries pivot if the
-// error is nil. Returns any error from the callback.
-func (t *T) IterKeys(cb func(key []byte, pivot uint32) (uint32, error)) error {
+// Flush iterates over all of the entries in the node, but only returning the key and
+// the pivot. The pivot returned by the callback is stored as the entries pivot. If
+// a pivot of zero is returned, the entry is dropped. Returns any error from the callback.
+func (t *T) Flush(cb func(key []byte, pivot uint32) (uint32, error)) error {
+	var (
+		bu   btreeBulk
+		nbuf = make([]byte, nodeHeaderSize)
+	)
+
 	var uerr error
 	err := t.iter(func(ent entry, buf []byte) bool {
+		key := ent.readKey(buf)
+
 		var npivot uint32
-		npivot, uerr = cb(ent.readKey(buf), ent.pivot)
-		if uerr != nil {
+		if npivot, uerr = cb(key, ent.pivot); uerr != nil || npivot == 0 {
 			return false
 		}
 
 		ent.pivot = npivot
+		ent.setOffset(uint32(len(nbuf)))
+
+		hdr := ent.header()
+		nbuf = append(nbuf, hdr[:]...)
+		nbuf = append(nbuf, key...)
+
+		bu.append(ent)
 		return true
 	})
 	if err != nil {
-		return err
+		return Error.Wrap(err)
 	}
-	return uerr
+	if uerr != nil {
+		return Error.Wrap(err)
+	}
+
+	// use the bulk loaded btree and buffer
+	t.buf = nbuf
+	t.entries = bu.done()
+	t.dirty = true
+	t.count = 0
+	t.cbuf = nil
+
+	return nil
 }

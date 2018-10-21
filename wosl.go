@@ -225,7 +225,7 @@ func (t *T) flush(n *node.T, block uint32) error {
 		nh    = n.Height()
 	)
 
-	err := n.IterKeys(func(key []byte, pivot uint32) (uint32, error) {
+	err := n.Flush(func(key []byte, pivot uint32) (uint32, error) {
 		// update which child node we will insert the entry into
 		if pivot != 0 && child != pivot {
 			le.Close()

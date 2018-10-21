@@ -9,7 +9,7 @@ import (
 
 const (
 	invalidNode    = math.MaxUint32
-	payloadEntries = 31
+	payloadEntries = 31 // 512 byte nodes
 	payloadSplit   = payloadEntries / 2
 )
 
@@ -26,7 +26,7 @@ type btreeNode struct {
 }
 
 // insertEntry inserts the entry into the node. it should never be called
-// on a node that would have to split.
+// on a node that would have to split. it returns true if the count increased.
 func (n *btreeNode) insertEntry(key []byte, ent entry, buf []byte) bool {
 	// binary search to find the appropriate child
 	i, j := uint8(0), n.count
