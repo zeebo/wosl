@@ -19,7 +19,7 @@ func TestNode(t *testing.T) {
 		}
 
 		last := ""
-		n.entries.Iter(func(ent *entry) bool {
+		n.entries.Iter(func(ent entry) bool {
 			key := string(ent.readKey(n.buf))
 			assert.That(t, key > last)
 			last = key

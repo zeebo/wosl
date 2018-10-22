@@ -243,19 +243,26 @@ func (t *T) iter(cb func(ent entry, buf []byte) bool) error {
 	var (
 		offset uint32 = nodeHeaderSize // offset into cbuf
 		i      uint32                  // index into count
-		ckey   []byte                  // current key from cbuf
-		cent   entry
-		err    error
+
+		cex     bool // if cprefix/ckey is valid
+		cprefix uint32
+		ckey    []byte // current key from cbuf
+		cent    entry
+
+		err error
 	)
 
 	// merge cbuf along with the btree
-	t.entries.Iter(func(ent *entry) bool {
+	t.entries.Iter(func(ent entry) bool {
 		if i >= t.count {
-			return cb(*ent, t.buf)
+			return cb(ent, t.buf)
 		}
 
+		var ekey []byte
+		eprefix := binary.BigEndian.Uint32(ent.prefix[:])
+
 		for {
-			if ckey == nil {
+			if !cex {
 				eoff := binary.BigEndian.Uint32(t.cbuf[offset:])
 
 				var ok bool
@@ -265,26 +272,38 @@ func (t *T) iter(cb func(ent entry, buf []byte) bool) error {
 					return false
 				}
 
-				ckey = cent.readKey(t.cbuf)
+				cprefix = binary.BigEndian.Uint32(cent.prefix[:])
 			}
 
-			switch bytes.Compare(ckey, ent.readKey(t.buf)) {
+			cmp := compare(cprefix, eprefix)
+			if cmp == 0 {
+				if ckey == nil {
+					ckey = cent.readKey(t.cbuf)
+				}
+				if ekey == nil {
+					ekey = ent.readKey(t.buf)
+				}
+				cmp = bytes.Compare(ckey, ekey)
+			}
+			switch cmp {
 			case -1: // ckey is earlier. send it off
 				if !cb(cent, t.cbuf) {
 					return false
 				}
-				ckey, i, offset = nil, i+1, offset+4
+				ckey, cex, i, offset = nil, false, i+1, offset+4
 
 			case 0: // same. use entry because it's new
-				if !cb(*ent, t.buf) {
+				if !cb(ent, t.buf) {
 					return false
 				}
+				ckey, cex, i, offset = nil, false, i+1, offset+4
 				return true // move to next entry
 
 			case 1: // ent is earlier. send it off
-				if !cb(*ent, t.buf) {
+				if !cb(ent, t.buf) {
 					return false
 				}
+				return true // move to next entry
 			}
 		}
 	})

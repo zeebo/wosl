@@ -3,39 +3,12 @@ package node
 import (
 	"fmt"
 	"math/rand"
-	"sort"
 	"testing"
 
 	"github.com/zeebo/wosl/internal/assert"
 )
 
 func TestBtree(t *testing.T) {
-	t.Run("Node", func(t *testing.T) {
-		var keys []string
-		var seen = map[string]bool{}
-		var buf []byte
-		var n btreeNode
-
-		for i := 0; i < payloadEntries-1; i++ {
-			var key string
-			for key == "" || seen[key] {
-				key = fmt.Sprint(gen.Uint32())
-			}
-
-			ent, bu := appendEntry(&buf, key, "")
-			n.insertEntry(ent.readKey(buf), ent, bu)
-
-			keys = append(keys, key)
-			seen[key] = true
-		}
-
-		sort.Strings(keys)
-
-		for i := uint8(0); i < n.count; i++ {
-			assert.Equal(t, string(n.payload[i].readKey(buf)), keys[i])
-		}
-	})
-
 	t.Run("Basic", func(t *testing.T) {
 		var set = map[string]bool{}
 		var buf []byte
@@ -50,7 +23,7 @@ func TestBtree(t *testing.T) {
 		assert.Equal(t, bt.len, len(set))
 
 		last := ""
-		bt.Iter(func(ent *entry) bool {
+		bt.Iter(func(ent entry) bool {
 			key := string(ent.readKey(buf))
 			assert.That(t, last < key)
 			assert.That(t, set[key])
@@ -82,7 +55,7 @@ func TestBtree(t *testing.T) {
 		assert.Equal(t, bt.len, len(set))
 
 		last := ""
-		bt.Iter(func(ent *entry) bool {
+		bt.Iter(func(ent entry) bool {
 			key := string(ent.readKey(buf))
 			assert.That(t, last < key)
 			assert.That(t, set[key])
