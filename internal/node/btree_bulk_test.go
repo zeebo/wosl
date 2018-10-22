@@ -13,7 +13,7 @@ func TestBtreeBulk(t *testing.T) {
 		var buf []byte
 
 		for i := 0; i < 1000; i++ {
-			ent, _ := appendEntry(&buf, fmt.Sprint(i), 0)
+			ent, _ := appendEntry(&buf, fmt.Sprint(i), "")
 			bu.append(ent)
 		}
 
@@ -32,7 +32,7 @@ func TestBtreeBulk(t *testing.T) {
 		var bu btreeBulk
 		var buf []byte
 
-		ent, _ := appendEntry(&buf, "0", 0)
+		ent, _ := appendEntry(&buf, "0", "")
 		bu.append(ent)
 		bt := bu.done()
 
@@ -59,7 +59,7 @@ func BenchmarkBtreeBulk(b *testing.B) {
 
 		ents := make([]entry, b.N)
 		for i := range ents {
-			ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), 0)
+			ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), "")
 		}
 
 		var bu btreeBulk

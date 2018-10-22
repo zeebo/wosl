@@ -9,37 +9,68 @@ const (
 	kindTombstone
 )
 
+// we require that keys are <= 1KB and that values are <= 1MB.
+// that means we have 10 bits for keys, and 20 bits for values.
+// pack the kind into 2 bits, and we use a uint32 for all of them.
+// we use another uint32 to describe the offset into some stream
+// that the key + value are stored. we use 4 more bytes to store
+// the prefix of the key so that we can do comparisons on those
+// without having to read the key in some cases.
+
 const (
-	keyBits   = 20
-	keyMask   = 1<<keyBits - 1
-	valueBits = 44
-	valueMask = 1<<valueBits - 1
+	keyShift = 0
+	keyBits  = 10
+	keyMask  = 1<<keyBits - 1
+
+	valueShift = keyShift + keyBits
+	valueBits  = 20
+	valueMask  = 1<<valueBits - 1
+
+	kindShift = valueShift + valueBits
+	kindBits  = 2
+	kindMask  = 1<<kindBits - 1
 )
+
+// kvk is a bit packed key/value/kind into 32 bits.
+type kvk uint32
+
+// newKVK returns an kvk with the values packed. It will truncate
+// any values that would not fit.
+func newKVK(key uint16, value uint32, kind uint8) kvk {
+	return kvk(
+		uint32(key&keyMask)<<keyShift |
+			uint32(value&valueMask)<<valueShift |
+			uint32(kind&kindMask)<<kindShift)
+}
+
+func (e kvk) key() uint16   { return uint16(e>>keyShift) & keyMask }
+func (e kvk) value() uint32 { return uint32(e>>valueShift) & valueMask }
+func (e kvk) kind() uint8   { return uint8(e>>kindShift) & kindMask }
 
 const entryHeaderSize = (0 +
 	4 + // pivot
-	1 + // kind
-	4 + // key length
-	4 + // value length
+	4 + // kvk
+	4 + // prefix
 	0)
-
-// TODO(jeff): entry insertion will go faster the smaller this struct is.
-// maybe we can do more aggressive packing at the cost of making readKey
-// more expensive. pivot, kind, and value are all not used during inserts.
 
 // entry is kept in sorted order in a node's memory buffer.
 type entry struct {
-	pivot   uint32 // 0 means no pivot: there is no block 0.
-	keyVal  uint64 // key is lowest 20 bits, value is highest 44.
-	kindOff uint32 // kind is lower 8 bits of kindOff
+	kvk            // 10 bits of key, 20 bits of value, 2 bits of kind.
+	pivot  uint32  // 0 means no pivot: there is no block 0.
+	prefix [4]byte // first four bytes of the key
+	offset uint32  // offset into the stream
 }
 
 // newEntry constructs an entry with the given parameters all bitpacked.
-func newEntry(pivot, key uint32, val uint64, offset uint32, kind uint8) entry {
+func newEntry(key, value []byte, kind uint8, offset uint32) entry {
+	var prefix [4]byte
+	copy(prefix[:], key)
+
 	return entry{
-		pivot:   pivot,
-		keyVal:  val<<keyBits | uint64(key),
-		kindOff: offset<<8 | uint32(kind),
+		pivot:  0,
+		kvk:    newKVK(uint16(len(key)), uint32(len(value)), kind),
+		prefix: prefix,
+		offset: offset,
 	}
 }
 
@@ -50,35 +81,37 @@ func readEntry(offset uint32, buf []byte) (entry, bool) {
 		return entry{}, false
 	}
 	buf = buf[offset:]
+
+	var prefix [4]byte
+	copy(prefix[:], buf[8:12])
+
 	return entry{
-		pivot:   uint32(binary.BigEndian.Uint32(buf[0:4])),
-		keyVal:  uint64(binary.BigEndian.Uint64(buf[4:12])),
-		kindOff: uint32(buf[12]) | uint32(offset)<<8,
+		kvk:    kvk(binary.LittleEndian.Uint32(buf[0:4])),
+		pivot:  uint32(binary.LittleEndian.Uint32(buf[4:8])),
+		prefix: prefix,
+		offset: offset,
 	}, true
 }
 
 // size returns how many bytes the entry consumes
-func (e entry) size() int64 { return entryHeaderSize + int64(e.key()) }
+func (e entry) size() int64 { return entryHeaderSize + int64(e.key()) + int64(e.value()) }
 
 // header returns an array of bytes containing the entry header.
-func (e *entry) header() (hdr [entryHeaderSize]byte) {
-	binary.BigEndian.PutUint32(hdr[0:4], uint32(e.pivot))
-	binary.BigEndian.PutUint64(hdr[4:12], uint64(e.keyVal))
-	hdr[12] = e.kind()
+func (e entry) header() (hdr [entryHeaderSize]byte) {
+	binary.LittleEndian.PutUint32(hdr[0:4], uint32(e.kvk))
+	binary.LittleEndian.PutUint32(hdr[4:8], uint32(e.pivot))
+	copy(hdr[8:12], e.prefix[:])
 	return hdr
 }
 
-// accessors for the bit packed fields
-
-func (e *entry) key() uint32    { return uint32(e.keyVal & keyMask) }
-func (e *entry) value() uint64  { return e.keyVal >> keyBits }
-func (e *entry) offset() uint32 { return e.kindOff >> 8 }
-func (e *entry) kind() uint8    { return uint8(e.kindOff) }
-
-func (e *entry) setOffset(offset uint32) { e.kindOff = offset<<8 | uint32(e.kind()) }
-
 // readKey returns a slice of the buffer that contains the key.
-func (e *entry) readKey(buf []byte) []byte {
-	start := entryHeaderSize + e.offset()
-	return buf[start : start+e.key()]
+func (e entry) readKey(buf []byte) []byte {
+	start := entryHeaderSize + e.offset
+	return buf[start : start+uint32(e.key())]
+}
+
+// readKey returns a slice of the buffer that contains the value.
+func (e entry) readValue(buf []byte) []byte {
+	start := entryHeaderSize + e.offset + uint32(e.key())
+	return buf[start : start+e.value()]
 }

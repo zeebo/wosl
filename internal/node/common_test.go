@@ -16,6 +16,7 @@ const (
 var (
 	numbers [][]byte
 	gen     = pcg.New(uint64(time.Now().UnixNano()), 0)
+	megabuf = make([]byte, 1<<19) // 512KB
 )
 
 func init() {
@@ -25,8 +26,8 @@ func init() {
 	}
 }
 
-func appendEntry(buf *[]byte, key string, value uint64) (entry, []byte) {
-	ent := newEntry(0, uint32(len(key)), value, uint32(len(*buf)), kindInsert)
+func appendEntry(buf *[]byte, key, value string) (entry, []byte) {
+	ent := newEntry([]byte(key), []byte(value), kindInsert, uint32(len(*buf)))
 	hdr := ent.header()
 	*buf = append(*buf, hdr[:]...)
 	*buf = append(*buf, key...)

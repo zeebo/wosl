@@ -22,7 +22,7 @@ func TestBtree(t *testing.T) {
 				key = fmt.Sprint(gen.Uint32())
 			}
 
-			ent, bu := appendEntry(&buf, key, 0)
+			ent, bu := appendEntry(&buf, key, "")
 			n.insertEntry(ent.readKey(buf), ent, bu)
 
 			keys = append(keys, key)
@@ -44,7 +44,7 @@ func TestBtree(t *testing.T) {
 		for i := 0; i < 100000; i++ {
 			d := string(numbers[gen.Intn(numbersSize)&numbersMask])
 			set[d] = true
-			bt.Insert(appendEntry(&buf, d, 0))
+			bt.Insert(appendEntry(&buf, d, ""))
 		}
 
 		assert.Equal(t, bt.len, len(set))
@@ -69,7 +69,7 @@ func TestBtree(t *testing.T) {
 		for i := 0; i < 100000; i++ {
 			d := string(numbers[gen.Intn(numbersSize)&numbersMask])
 			set[d] = true
-			ent, _ := appendEntry(&buf, d, 0)
+			ent, _ := appendEntry(&buf, d, "")
 			entries = append(entries, ent)
 		}
 		rand.Shuffle(len(entries), func(i, j int) {
@@ -101,14 +101,14 @@ func TestBtree(t *testing.T) {
 			var buf []byte
 			var bt btree
 
-			bt.Insert(appendEntry(&buf, "A", 0))
-			bt.Insert(appendEntry(&buf, "F", 0))
-			bt.Insert(appendEntry(&buf, "D", 0))
-			bt.Insert(appendEntry(&buf, "C", 0))
-			bt.Insert(appendEntry(&buf, "E", 0))
-			bt.Insert(appendEntry(&buf, "G", 0))
-			bt.Insert(appendEntry(&buf, "B", 0))
-			bt.Insert(appendEntry(&buf, "A", 0))
+			bt.Insert(appendEntry(&buf, "A", ""))
+			bt.Insert(appendEntry(&buf, "F", ""))
+			bt.Insert(appendEntry(&buf, "D", ""))
+			bt.Insert(appendEntry(&buf, "C", ""))
+			bt.Insert(appendEntry(&buf, "E", ""))
+			bt.Insert(appendEntry(&buf, "G", ""))
+			bt.Insert(appendEntry(&buf, "B", ""))
+			bt.Insert(appendEntry(&buf, "A", ""))
 
 			assert.Equal(t, bt.len, 7)
 		})
@@ -117,15 +117,15 @@ func TestBtree(t *testing.T) {
 			var buf []byte
 			var bt btree
 
-			bt.Insert(appendEntry(&buf, "A", 0))
-			bt.Insert(appendEntry(&buf, "F", 0))
-			bt.Insert(appendEntry(&buf, "D", 0))
-			bt.Insert(appendEntry(&buf, "D", 0))
-			bt.Insert(appendEntry(&buf, "C", 0))
-			bt.Insert(appendEntry(&buf, "A", 0))
-			bt.Insert(appendEntry(&buf, "C", 0))
-			bt.Insert(appendEntry(&buf, "E", 0))
-			bt.Insert(appendEntry(&buf, "B", 0))
+			bt.Insert(appendEntry(&buf, "A", ""))
+			bt.Insert(appendEntry(&buf, "F", ""))
+			bt.Insert(appendEntry(&buf, "D", ""))
+			bt.Insert(appendEntry(&buf, "D", ""))
+			bt.Insert(appendEntry(&buf, "C", ""))
+			bt.Insert(appendEntry(&buf, "A", ""))
+			bt.Insert(appendEntry(&buf, "C", ""))
+			bt.Insert(appendEntry(&buf, "E", ""))
+			bt.Insert(appendEntry(&buf, "B", ""))
 
 			assert.Equal(t, bt.len, 6)
 		})
@@ -138,7 +138,7 @@ func BenchmarkBtree(b *testing.B) {
 
 		ents := make([]entry, b.N)
 		for i := range ents {
-			ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), 0)
+			ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), "")
 		}
 
 		var bt btree
@@ -156,7 +156,7 @@ func BenchmarkBtree(b *testing.B) {
 		ents := make([]entry, b.N)
 		for i := range ents {
 			key := string(numbers[gen.Intn(numbersSize)&numbersMask])
-			ents[i], _ = appendEntry(&buf, key, 0)
+			ents[i], _ = appendEntry(&buf, key, "")
 		}
 
 		var bt btree

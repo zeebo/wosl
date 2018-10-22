@@ -33,7 +33,7 @@ const nodeHeaderSize = (0 +
 // T is a node in a write-optimized skip list. It targets a specific size
 // and maintains entry pointers into the buf.
 type T struct {
-	buf     []byte // buffer containing the keys
+	buf     []byte // buffer containing the keys and values
 	next    uint32 // pointer to the next node (or 0)
 	height  uint32 // height of the node
 	pivot   uint32 // pivot for special root node
@@ -140,6 +140,7 @@ func (t *T) Write(buf []byte) ([]byte, error) {
 		hdr := ent.header()
 		buf = append(buf, hdr[:]...)
 		buf = append(buf, ent.readKey(ebuf)...)
+		buf = append(buf, ent.readValue(ebuf)...)
 		return true
 	})
 	if err != nil {
@@ -169,9 +170,10 @@ func (t *T) Reset() {
 }
 
 // Fits returns if a write for the given key would fit in size.
-func (t *T) Fits(key []byte, size uint32) bool {
+func (t *T) Fits(key, value []byte, size uint32) bool {
 	return len(key) <= keyMask &&
-		entryHeaderSize+int64(len(key))+4 < int64(size) &&
+		len(value) <= valueMask &&
+		entryHeaderSize+int64(len(key))+int64(len(value))+4 < int64(size) &&
 		t.Count() < math.MaxUint32
 }
 
@@ -180,22 +182,23 @@ var insertThunk mon.Thunk // timing info for Insert
 // Insert associates the key with the value in the node. If wrote is
 // false, then there was not enough space, and the node should be
 // flushed.
-func (t *T) Insert(key []byte, value uint64) (wrote bool) {
+func (t *T) Insert(key, value []byte) (wrote bool) {
 	timer := insertThunk.Start()
 
 	// make sure the write is ok to go
-	if value > valueMask || !t.Fits(key, math.MaxUint32) {
+	if !t.Fits(key, value, math.MaxUint32) {
 		timer.Stop()
 		return false
 	}
 
 	// build the entry that we will insert.
-	ent := newEntry(0, uint32(len(key)), value, uint32(len(t.buf)), kindInsert)
+	ent := newEntry(key, value, kindInsert, uint32(len(t.buf)))
 
 	// add the entry to the buffer
 	hdr := ent.header()
 	t.buf = append(t.buf, hdr[:]...)
 	t.buf = append(t.buf, key...)
+	t.buf = append(t.buf, value...)
 
 	// insert it into the btree.
 	t.entries.Insert(ent, t.buf)
@@ -214,13 +217,13 @@ func (t *T) Delete(key []byte) (wrote bool) {
 	timer := deleteThunk.Start()
 
 	// make sure the write is ok to go
-	if !t.Fits(key, math.MaxUint32) {
+	if !t.Fits(key, nil, math.MaxUint32) {
 		timer.Stop()
 		return false
 	}
 
 	// build the entry that we will insert.
-	ent := newEntry(0, uint32(len(key)), 0, uint32(len(t.buf)), kindTombstone)
+	ent := newEntry(key, nil, kindTombstone, uint32(len(t.buf)))
 
 	// add the entry to the buffer
 	hdr := ent.header()
@@ -329,12 +332,14 @@ func (t *T) Flush(cb func(key []byte, pivot uint32) (uint32, error)) error {
 			return false
 		}
 
+		value := ent.readValue(buf)
 		ent.pivot = npivot
-		ent.setOffset(uint32(len(nbuf)))
+		ent.offset = uint32(len(nbuf))
 
 		hdr := ent.header()
 		nbuf = append(nbuf, hdr[:]...)
 		nbuf = append(nbuf, key...)
+		nbuf = append(nbuf, value...)
 
 		bu.append(ent)
 		return true
