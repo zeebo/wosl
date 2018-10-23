@@ -47,11 +47,11 @@ func New(next, height uint32) *T {
 	}
 }
 
-var loadThunk mon.Thunk // timing info for Load
+var nodeLoadThunk mon.Thunk // timing info for node.Load
 
 // Load returns a node from reading the given buffer.
 func Load(buf []byte) (*T, error) {
-	timer := loadThunk.Start()
+	timer := nodeLoadThunk.Start()
 
 	if len(buf) < nodeHeaderSize {
 		timer.Stop()
@@ -127,7 +127,7 @@ func (t *T) Dirty() bool { return t.dirty }
 // Sully forces the node to be dirty, even if no writes have happened.
 func (t *T) Sully() { t.dirty = true }
 
-var writeThunk mon.Thunk // timing info for Write
+var nodeWriteThunk mon.Thunk // timing info for node.Write
 
 // TODO(jeff): do we want to include the lengths before the key and value so
 // that a scan doesn't have to continue to load what the next entry is from
@@ -138,7 +138,7 @@ var writeThunk mon.Thunk // timing info for Write
 // a new one is allocated. It holds on to the returned buffer, so do not
 // modify it.
 func (t *T) Write(buf []byte) ([]byte, error) {
-	timer := writeThunk.Start()
+	timer := nodeWriteThunk.Start()
 
 	length := t.Length()
 	if length > math.MaxUint32 {
@@ -200,13 +200,13 @@ func (t *T) Fits(key, value []byte, size uint32) bool {
 		t.Length()+10*btreeNodeSize < uint64(size)
 }
 
-var insertThunk mon.Thunk // timing info for Insert
+var nodeInsertThunk mon.Thunk // timing info for node.Insert
 
 // Insert associates the key with the value in the node. If wrote is
 // false, then there was not enough space, and the node should be
 // flushed.
 func (t *T) Insert(key, value []byte) (wrote bool) {
-	timer := insertThunk.Start()
+	timer := nodeInsertThunk.Start()
 
 	// make sure the write is ok to go
 	if !t.Fits(key, value, math.MaxUint32) {
@@ -229,13 +229,13 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 	return true
 }
 
-var deleteThunk mon.Thunk // timing info for Delete
+var nodeDeleteThunk mon.Thunk // timing info for node.Delete
 
 // Delete removes the key from the node. It does not reclaim space
 // in the buffer. If wrote is false, there was not enough space, and
 // the node should be flushed.
 func (t *T) Delete(key []byte) (wrote bool) {
-	timer := deleteThunk.Start()
+	timer := nodeDeleteThunk.Start()
 
 	// make sure the write is ok to go
 	if !t.Fits(key, nil, math.MaxUint32) {
