@@ -88,7 +88,7 @@ func BenchmarkNode(b *testing.B) {
 			}
 		}
 
-		b.Run("1MB", func(b *testing.B) { run(b, megabuf) })
+		b.Run("32KB", func(b *testing.B) { run(b, megabuf) })
 		b.Run("1KB", func(b *testing.B) { run(b, megabuf[:1<<10]) })
 		b.Run("16B", func(b *testing.B) { run(b, megabuf[:1<<4]) })
 		b.Run("0B", func(b *testing.B) { run(b, nil) })
@@ -115,7 +115,7 @@ func BenchmarkNode(b *testing.B) {
 			}
 		}
 
-		b.Run("512KB", func(b *testing.B) { run(b, megabuf) })
+		b.Run("32KB", func(b *testing.B) { run(b, megabuf) })
 		b.Run("1KB", func(b *testing.B) { run(b, megabuf[:1<<10]) })
 		b.Run("16B", func(b *testing.B) { run(b, megabuf[:1<<4]) })
 		b.Run("0B", func(b *testing.B) { run(b, nil) })
@@ -142,7 +142,7 @@ func BenchmarkNode(b *testing.B) {
 			}
 		}
 
-		b.Run("512KB", func(b *testing.B) { run(b, megabuf) })
+		b.Run("32KB", func(b *testing.B) { run(b, megabuf) })
 		b.Run("1KB", func(b *testing.B) { run(b, megabuf[:1<<10]) })
 		b.Run("16B", func(b *testing.B) { run(b, megabuf[:1<<4]) })
 		b.Run("0B", func(b *testing.B) { run(b, nil) })

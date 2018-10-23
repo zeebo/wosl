@@ -11,8 +11,8 @@ const (
 	kindTombstone
 )
 
-// we require that keys are <= 1KB and that values are <= 1MB.
-// that means we have 10 bits for keys, and 20 bits for values.
+// we require that keys are < 32KB and that values are < 32KB.
+// that means we have 15 bits for keys, and 15 bits for values.
 // pack the kind into 2 bits, and we use a uint32 for all of them.
 // we use another uint32 to describe the offset into some stream
 // that the key + value are stored. we use 4 more bytes to store
@@ -21,11 +21,11 @@ const (
 
 const (
 	keyShift = 0
-	keyBits  = 10
+	keyBits  = 15
 	keyMask  = 1<<keyBits - 1
 
 	valueShift = keyShift + keyBits
-	valueBits  = 20
+	valueBits  = 15
 	valueMask  = 1<<valueBits - 1
 
 	kindShift = valueShift + valueBits

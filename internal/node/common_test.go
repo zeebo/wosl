@@ -17,7 +17,7 @@ const (
 var (
 	numbers [][]byte
 	gen     = pcg.New(uint64(time.Now().UnixNano()), 0)
-	megabuf = make([]byte, 1<<19) // 512KB
+	megabuf = make([]byte, 1<<15-1) // 32KB - 1
 )
 
 func init() {
