@@ -270,7 +270,7 @@ func (t *T) iter(cb func(ent *Entry, buf []byte) bool) error {
 
 // Flush iterates over all of the entries in the node. If the entry is returned
 // with a zero pivot, it is removed. Returns any error from the callback.
-func (t *T) Flush(cb func(ent *Entry, key []byte) error) error {
+func (t *T) Flush(cb func(ent *Entry, key, value []byte) error) error {
 	var (
 		bu   btreeBulk
 		nbuf []byte
@@ -279,8 +279,7 @@ func (t *T) Flush(cb func(ent *Entry, key []byte) error) error {
 
 	var err error
 	t.entries.Iter(func(ent *Entry) bool {
-		key := ent.readKey(base)
-		if err = cb(ent, key); err != nil {
+		if err = cb(ent, ent.readKey(base), ent.readValue(base)); err != nil {
 			return false
 		} else if ent.pivot == 0 {
 			return true

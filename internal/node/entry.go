@@ -23,7 +23,7 @@ const (
 	tombstoneMask  = 1<<tombstoneBits - 1
 )
 
-// Entry is kept in sorted order in a node's memory buffer.
+// Entry represents an entry in the node.
 type Entry struct {
 	kvt    uint32  // bitpacked key+value+tombstone
 	pivot  uint32  // 0 means no pivot: there is no block 0.
