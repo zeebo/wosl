@@ -25,12 +25,12 @@ type btreeNode struct {
 	count   uint16  // used values in payload
 	leaf    bool    // set if is a leaf
 	_       [1]byte // padding
-	payload [payloadEntries]entry
+	payload [payloadEntries]Entry
 }
 
 // insertEntry inserts the entry into the node. it should never be called
 // on a node that would have to split. it returns true if the count increased.
-func (n *btreeNode) insertEntry(key []byte, ent entry, buf []byte) bool {
+func (n *btreeNode) insertEntry(key []byte, ent Entry, buf []byte) bool {
 	prefix := binary.BigEndian.Uint32(ent.prefix[:])
 
 	// binary search to find the appropriate child
@@ -43,17 +43,24 @@ func (n *btreeNode) insertEntry(key []byte, ent entry, buf []byte) bool {
 		switch compare(prefix, prefixh) {
 		case 1:
 			i = h + 1
+
 		case 0:
 			kh := enth.readKey(buf)
 			switch bytes.Compare(key, kh) {
 			case 1:
 				i = h + 1
-			case 0: // found a match. overwite and exit
+
+			case 0:
+				// found a match. overwite and exit.
+				// we want to retain the pivot field, though.
+				ent.pivot = enth.pivot
 				n.payload[h] = ent
 				return false
+
 			case -1:
 				j = h
 			}
+
 		case -1:
 			j = h
 		}
@@ -68,7 +75,7 @@ func (n *btreeNode) insertEntry(key []byte, ent entry, buf []byte) bool {
 // appendEntry appends the entry into the node. it must compare greater than any
 // element inside of the node, already, and should never be called on a node that
 // would have to split.
-func (n *btreeNode) appendEntry(ent entry) {
+func (n *btreeNode) appendEntry(ent Entry) {
 	n.payload[n.count] = ent
 	n.count++
 }

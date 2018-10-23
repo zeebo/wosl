@@ -10,7 +10,7 @@ type btreeBulk struct {
 
 // append cheaply adds the entry to the btree. it must be strictly
 // greater than any earlier entry.
-func (b *btreeBulk) append(ent entry) {
+func (b *btreeBulk) append(ent Entry) {
 	if b.n == nil {
 		b.n, b.nid = b.b.alloc(true)
 		b.b.root, b.b.rid = b.n, b.nid

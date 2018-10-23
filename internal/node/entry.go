@@ -1,16 +1,5 @@
 package node
 
-import (
-	"encoding/binary"
-)
-
-const (
-	// the different kinds of entries. kindSentinel is used for the special
-	// element that ensures there is a root for the entire structure.
-	kindInsert = iota
-	kindTombstone
-)
-
 // we require that keys are < 32KB and that values are < 32KB.
 // that means we have 15 bits for keys, and 15 bits for values.
 // pack the kind into 2 bits, and we use a uint32 for all of them.
@@ -29,36 +18,35 @@ const (
 	valueBits  = 15
 	valueMask  = 1<<valueBits - 1
 
-	kindShift = valueShift + valueBits
-	kindBits  = 2
-	kindMask  = 1<<kindBits - 1
+	tombstoneShift = valueShift + valueBits
+	tombstoneBits  = 1
+	tombstoneMask  = 1<<tombstoneBits - 1
 )
 
-const entryHeaderSize = (0 +
-	4 + // kvk
-	4 + // pivot
-	4 + // prefix
-	0)
-
-// entry is kept in sorted order in a node's memory buffer.
-type entry struct {
-	kvk    uint32  // bitpacked key+value+kind
+// Entry is kept in sorted order in a node's memory buffer.
+type Entry struct {
+	kvt    uint32  // bitpacked key+value+tombstone
 	pivot  uint32  // 0 means no pivot: there is no block 0.
 	prefix [4]byte // first four bytes of the key
 	offset uint32  // offset into the stream
 }
 
-// newEntry constructs an entry with the given parameters all bitpacked.
-func newEntry(key, value []byte, kind uint8, offset uint32) entry {
+// newEntry constructs an Entry with the given parameters all bitpacked.
+func newEntry(key, value []byte, tombstone bool, offset uint32) Entry {
 	var prefix [4]byte
 	copy(prefix[:], key)
 
-	kvk := uint32(len(key)&keyMask)<<keyShift |
-		uint32(len(value)&valueMask)<<valueShift |
-		uint32(kind&kindMask)<<kindShift
+	t := 0
+	if tombstone {
+		t = 1
+	}
 
-	return entry{
-		kvk:    kvk,
+	kvt := uint32(len(key)&keyMask)<<keyShift |
+		uint32(len(value)&valueMask)<<valueShift |
+		uint32(t&tombstoneMask)<<tombstoneShift
+
+	return Entry{
+		kvt:    kvt,
 		pivot:  0,
 		prefix: prefix,
 		offset: offset,
@@ -66,37 +54,32 @@ func newEntry(key, value []byte, kind uint8, offset uint32) entry {
 }
 
 // key returns how many bytes of key there are.
-func (e entry) key() uint32 { return uint32(e.kvk>>keyShift) & keyMask }
+func (e Entry) key() uint32 { return uint32(e.kvt>>keyShift) & keyMask }
 
 // value returns how many bytes of value there are.
-func (e entry) value() uint32 { return uint32(e.kvk>>valueShift) & valueMask }
+func (e Entry) value() uint32 { return uint32(e.kvt>>valueShift) & valueMask }
 
-// kind returns the entry kind.
-func (e entry) kind() uint8 { return uint8(e.kvk>>kindShift) & kindMask }
+// Tombstone returns true if the Entry is a tombstone.
+func (e Entry) Tombstone() bool { return uint8(e.kvt>>tombstoneShift)&tombstoneMask > 0 }
 
-// size returns how many bytes the entry consumes as.
-func (e entry) size() uint64 { return entryHeaderSize + uint64(e.key()) + uint64(e.value()) }
+// Pivot returns the pivot of the Entry
+func (e Entry) Pivot() uint32 { return e.pivot }
 
-// header returns an array of bytes containing the entry header.
-func (e entry) header() (hdr [entryHeaderSize]byte) {
-	binary.LittleEndian.PutUint32(hdr[0:4], uint32(e.kvk))
-	binary.LittleEndian.PutUint32(hdr[4:8], uint32(e.pivot))
-	copy(hdr[8:12], e.prefix[:])
-	return hdr
-}
+// SetPivot updates the pivot of the Entry.
+func (e *Entry) SetPivot(pivot uint32) { e.pivot = pivot }
 
 // readKey returns a slice of the buffer that contains the key.
-func (e entry) readKey(buf []byte) []byte {
+func (e Entry) readKey(buf []byte) []byte {
 	return buf[e.offset : e.offset+e.key()]
 }
 
 // readKey returns a slice of the buffer that contains the value.
-func (e entry) readValue(buf []byte) []byte {
+func (e Entry) readValue(buf []byte) []byte {
 	start := e.offset + e.key()
 	return buf[start : start+e.value()]
 }
 
 // readEntry returns a byte containing the combined key and value.
-func (e entry) readEntry(buf []byte) []byte {
+func (e Entry) readEntry(buf []byte) []byte {
 	return buf[e.offset : e.offset+e.key()+e.value()]
 }

@@ -120,8 +120,9 @@ func (b *btree) split(n *btreeNode, nid uint32) (*btreeNode, uint32) {
 }
 
 // Insert puts the entry into the btree, using the buf to read keys
-// to determine the position.
-func (b *btree) Insert(ent entry, buf []byte) {
+// to determine the position. It returns true if the insert created
+// a new entry.
+func (b *btree) Insert(ent Entry, buf []byte) bool {
 	key := ent.readKey(buf)
 
 	// easy case: if we have no root, we can just allocate it
@@ -130,19 +131,20 @@ func (b *btree) Insert(ent entry, buf []byte) {
 		b.root, b.rid = b.alloc(true)
 		b.root.insertEntry(key, ent, buf)
 		b.entries++
-		return
+		return true
 	}
 
 	// search for the leaf that should contain the node
 	n, nid := b.search(key, buf)
 	for {
-		if n.insertEntry(key, ent, buf) && n.leaf {
+		added := n.insertEntry(key, ent, buf)
+		if added && n.leaf {
 			b.entries++
 		}
 
 		// easy case: if the node still has enough room, we're done.
 		if n.count < payloadEntries {
-			return
+			return added
 		}
 
 		// update the entry we're going to insert to be the entry we're
@@ -181,7 +183,7 @@ func (b *btree) Insert(ent entry, buf []byte) {
 // append adds the entry to the node, splitting if necessary. the entry must
 // be greater than any entry already in the node. n remains to the right of
 // and at least as low than any newly created nodes.
-func (b *btree) append(n *btreeNode, nid uint32, ent entry) {
+func (b *btree) append(n *btreeNode, nid uint32, ent Entry) {
 	for {
 		n.appendEntry(ent)
 		b.entries++
@@ -225,7 +227,7 @@ func (b *btree) append(n *btreeNode, nid uint32, ent entry) {
 }
 
 // Iter calls the callback with all of the entries in order.
-func (b *btree) Iter(cb func(ent *entry) bool) {
+func (b *btree) Iter(cb func(ent *Entry) bool) {
 	n := b.root
 	if b.root == nil {
 		return

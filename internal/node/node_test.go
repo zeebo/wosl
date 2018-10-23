@@ -19,7 +19,7 @@ func TestNode(t *testing.T) {
 		}
 
 		last := ""
-		n.iter(func(ent *entry, buf []byte) bool {
+		n.iter(func(ent *Entry, buf []byte) bool {
 			key := string(ent.readKey(buf))
 			assert.That(t, key > last)
 			last = key
@@ -44,14 +44,14 @@ func TestNode(t *testing.T) {
 			assert.NoError(t, err)
 
 			var keys1, values1 []string
-			n1.iter(func(ent *entry, buf []byte) bool {
+			n1.iter(func(ent *Entry, buf []byte) bool {
 				keys1 = append(keys1, string(ent.readKey(buf)))
 				values1 = append(values1, string(ent.readValue(buf)))
 				return true
 			})
 
 			var keys2, values2 []string
-			n2.iter(func(ent *entry, buf []byte) bool {
+			n2.iter(func(ent *Entry, buf []byte) bool {
 				keys2 = append(keys2, string(ent.readKey(buf)))
 				values2 = append(values2, string(ent.readValue(buf)))
 				return true

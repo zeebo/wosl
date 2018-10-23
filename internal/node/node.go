@@ -162,7 +162,7 @@ func (t *T) Write(buf []byte) ([]byte, error) {
 
 	// compact the entries so that their offsets are increasing
 	data := buf[nodeHeaderPadded+btreeSize : nodeHeaderPadded+btreeSize : len(buf)]
-	t.iter(func(ent *entry, buf []byte) bool {
+	t.iter(func(ent *Entry, buf []byte) bool {
 		offset := uint32(len(data))
 		data = append(data, ent.readEntry(buf)...)
 		ent.offset = offset
@@ -215,7 +215,7 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 	}
 
 	// build the entry that we will insert.
-	ent := newEntry(key, value, kindInsert, uint32(len(t.buf))-t.base)
+	ent := newEntry(key, value, false, uint32(len(t.buf))-t.base)
 
 	// add the data to the buffer
 	t.buf = append(t.buf, key...)
@@ -244,7 +244,7 @@ func (t *T) Delete(key []byte) (wrote bool) {
 	}
 
 	// build the entry that we will insert.
-	ent := newEntry(key, nil, kindTombstone, uint32(len(t.buf))-t.base)
+	ent := newEntry(key, nil, true, uint32(len(t.buf))-t.base)
 
 	// add the data to the buffer
 	t.buf = append(t.buf, key...)
@@ -260,18 +260,17 @@ func (t *T) Delete(key []byte) (wrote bool) {
 // iter is a helper to iterate over all of the entries with the appropriate buffer
 // for their offset. It is usually not used internally to avoid the double function
 // call overhead.
-func (t *T) iter(cb func(ent *entry, buf []byte) bool) error {
+func (t *T) iter(cb func(ent *Entry, buf []byte) bool) error {
 	base := t.buf[t.base:]
-	t.entries.Iter(func(ent *entry) bool {
+	t.entries.Iter(func(ent *Entry) bool {
 		return cb(ent, base)
 	})
 	return nil
 }
 
-// Flush iterates over all of the entries in the node, but only returning the key and
-// the pivot. The pivot returned by the callback is stored as the entries pivot. If
-// a pivot of zero is returned, the entry is dropped. Returns any error from the callback.
-func (t *T) Flush(cb func(key []byte, pivot uint32) (uint32, error)) error {
+// Flush iterates over all of the entries in the node. If the entry is returned
+// with a zero pivot, it is removed. Returns any error from the callback.
+func (t *T) Flush(cb func(ent *Entry, key []byte) error) error {
 	var (
 		bu   btreeBulk
 		nbuf []byte
@@ -279,16 +278,15 @@ func (t *T) Flush(cb func(key []byte, pivot uint32) (uint32, error)) error {
 	)
 
 	var err error
-	t.entries.Iter(func(ent *entry) bool {
-		var npivot uint32
-		if npivot, err = cb(ent.readKey(base), ent.pivot); err != nil {
+	t.entries.Iter(func(ent *Entry) bool {
+		key := ent.readKey(base)
+		if err = cb(ent, key); err != nil {
 			return false
-		} else if npivot == 0 {
+		} else if ent.pivot == 0 {
 			return true
 		}
 
 		nbuf = append(nbuf, ent.readEntry(base)...)
-		ent.pivot = npivot
 		ent.offset = uint32(len(nbuf))
 		bu.append(*ent)
 		return true

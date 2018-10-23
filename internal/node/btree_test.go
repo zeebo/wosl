@@ -23,7 +23,7 @@ func TestBtree(t *testing.T) {
 		assert.Equal(t, bt.entries, len(set))
 
 		last := ""
-		bt.Iter(func(ent *entry) bool {
+		bt.Iter(func(ent *Entry) bool {
 			key := string(ent.readKey(buf))
 			assert.That(t, last < key)
 			assert.That(t, set[key])
@@ -35,7 +35,7 @@ func TestBtree(t *testing.T) {
 
 	t.Run("Random", func(t *testing.T) {
 		var set = map[string]bool{}
-		var entries []entry
+		var entries []Entry
 		var buf []byte
 		var bt btree
 
@@ -55,7 +55,7 @@ func TestBtree(t *testing.T) {
 		assert.Equal(t, bt.entries, len(set))
 
 		last := ""
-		bt.Iter(func(ent *entry) bool {
+		bt.Iter(func(ent *Entry) bool {
 			key := string(ent.readKey(buf))
 			assert.That(t, last < key)
 			assert.That(t, set[key])
@@ -83,7 +83,7 @@ func TestBtree(t *testing.T) {
 		assert.Equal(t, bt.entries, len(set))
 
 		last := ""
-		bt.Iter(func(ent *entry) bool {
+		bt.Iter(func(ent *Entry) bool {
 			key := string(ent.readKey(buf))
 			value := string(ent.readValue(buf))
 			assert.Equal(t, key, value)
@@ -140,7 +140,7 @@ func BenchmarkBtree(b *testing.B) {
 		b.Run("Sorted", func(b *testing.B) {
 			var buf []byte
 
-			ents := make([]entry, b.N)
+			ents := make([]Entry, b.N)
 			for i := range ents {
 				ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), "")
 			}
@@ -157,7 +157,7 @@ func BenchmarkBtree(b *testing.B) {
 		b.Run("Random", func(b *testing.B) {
 			var buf []byte
 
-			ents := make([]entry, b.N)
+			ents := make([]Entry, b.N)
 			for i := range ents {
 				key := string(numbers[gen.Intn(numbersSize)&numbersMask])
 				ents[i], _ = appendEntry(&buf, key, "")
