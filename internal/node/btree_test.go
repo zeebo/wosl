@@ -20,10 +20,10 @@ func TestBtree(t *testing.T) {
 			bt.Insert(appendEntry(&buf, d, ""))
 		}
 
-		assert.Equal(t, bt.len, len(set))
+		assert.Equal(t, bt.entries, len(set))
 
 		last := ""
-		bt.Iter(func(ent entry) bool {
+		bt.Iter(func(ent *entry) bool {
 			key := string(ent.readKey(buf))
 			assert.That(t, last < key)
 			assert.That(t, set[key])
@@ -52,11 +52,41 @@ func TestBtree(t *testing.T) {
 			bt.Insert(ent, buf)
 		}
 
-		assert.Equal(t, bt.len, len(set))
+		assert.Equal(t, bt.entries, len(set))
 
 		last := ""
-		bt.Iter(func(ent entry) bool {
+		bt.Iter(func(ent *entry) bool {
 			key := string(ent.readKey(buf))
+			assert.That(t, last < key)
+			assert.That(t, set[key])
+			delete(set, key)
+			last = key
+			return true
+		})
+	})
+
+	t.Run("Write+Load", func(t *testing.T) {
+		var set = map[string]bool{}
+		var buf []byte
+		var bt btree
+
+		for i := 0; i < 100000; i++ {
+			d := string(numbers[gen.Intn(numbersSize)&numbersMask])
+			set[d] = true
+			bt.Insert(appendEntry(&buf, d, d))
+		}
+
+		data := bt.write(nil)
+		bt, err := loadBtree(data)
+		assert.NoError(t, err)
+
+		assert.Equal(t, bt.entries, len(set))
+
+		last := ""
+		bt.Iter(func(ent *entry) bool {
+			key := string(ent.readKey(buf))
+			value := string(ent.readValue(buf))
+			assert.Equal(t, key, value)
 			assert.That(t, last < key)
 			assert.That(t, set[key])
 			delete(set, key)
@@ -83,7 +113,7 @@ func TestBtree(t *testing.T) {
 			bt.Insert(appendEntry(&buf, "B", ""))
 			bt.Insert(appendEntry(&buf, "A", ""))
 
-			assert.Equal(t, bt.len, 7)
+			assert.Equal(t, bt.entries, 7)
 		})
 
 		t.Run("Two", func(t *testing.T) {
@@ -100,44 +130,100 @@ func TestBtree(t *testing.T) {
 			bt.Insert(appendEntry(&buf, "E", ""))
 			bt.Insert(appendEntry(&buf, "B", ""))
 
-			assert.Equal(t, bt.len, 6)
+			assert.Equal(t, bt.entries, 6)
 		})
 	})
 }
 
 func BenchmarkBtree(b *testing.B) {
-	b.Run("Sorted", func(b *testing.B) {
-		var buf []byte
+	b.Run("Insert", func(b *testing.B) {
+		b.Run("Sorted", func(b *testing.B) {
+			var buf []byte
 
-		ents := make([]entry, b.N)
-		for i := range ents {
-			ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), "")
-		}
+			ents := make([]entry, b.N)
+			for i := range ents {
+				ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), "")
+			}
 
-		var bt btree
-		b.ReportAllocs()
-		b.ResetTimer()
+			var bt btree
+			b.ReportAllocs()
+			b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
-			bt.Insert(ents[i], buf)
-		}
+			for i := 0; i < b.N; i++ {
+				bt.Insert(ents[i], buf)
+			}
+		})
+
+		b.Run("Random", func(b *testing.B) {
+			var buf []byte
+
+			ents := make([]entry, b.N)
+			for i := range ents {
+				key := string(numbers[gen.Intn(numbersSize)&numbersMask])
+				ents[i], _ = appendEntry(&buf, key, "")
+			}
+
+			var bt btree
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				bt.Insert(ents[i], buf)
+			}
+		})
 	})
 
-	b.Run("Random", func(b *testing.B) {
-		var buf []byte
+	b.Run("Write", func(b *testing.B) {
+		run := func(b *testing.B, n int) {
+			var bt btree
+			var buf []byte
 
-		ents := make([]entry, b.N)
-		for i := range ents {
-			key := string(numbers[gen.Intn(numbersSize)&numbersMask])
-			ents[i], _ = appendEntry(&buf, key, "")
+			for i := 0; i < n; i++ {
+				key := string(numbers[gen.Intn(numbersSize)&numbersMask])
+				ent, _ := appendEntry(&buf, key, "")
+				bt.Insert(ent, buf)
+			}
+			out := bt.write(nil)
+
+			b.SetBytes(int64(len(out)))
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				out = bt.write(out)
+			}
 		}
 
-		var bt btree
-		b.ReportAllocs()
-		b.ResetTimer()
+		b.Run("100", func(b *testing.B) { run(b, 100) })
+		b.Run("1K", func(b *testing.B) { run(b, 1000) })
+		b.Run("10K", func(b *testing.B) { run(b, 10000) })
+		b.Run("100K", func(b *testing.B) { run(b, 100000) })
+	})
 
-		for i := 0; i < b.N; i++ {
-			bt.Insert(ents[i], buf)
+	b.Run("Load", func(b *testing.B) {
+		run := func(b *testing.B, n int) {
+			var bt btree
+			var buf []byte
+
+			for i := 0; i < n; i++ {
+				key := string(numbers[gen.Intn(numbersSize)&numbersMask])
+				ent, _ := appendEntry(&buf, key, "")
+				bt.Insert(ent, buf)
+			}
+			out := bt.write(nil)
+
+			b.SetBytes(int64(len(out)))
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				bt, _ = loadBtree(out)
+			}
 		}
+
+		b.Run("100", func(b *testing.B) { run(b, 100) })
+		b.Run("1K", func(b *testing.B) { run(b, 1000) })
+		b.Run("10K", func(b *testing.B) { run(b, 10000) })
+		b.Run("100K", func(b *testing.B) { run(b, 100000) })
 	})
 }

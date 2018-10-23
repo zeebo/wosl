@@ -15,12 +15,12 @@ func TestNode(t *testing.T) {
 
 		for i := 0; i < 100; i++ {
 			buf := []byte(fmt.Sprint(gen.Intn(100)))
-			assert.That(t, n.Insert(buf, megabuf[:1024]))
+			assert.That(t, n.Insert(buf, nil))
 		}
 
 		last := ""
-		n.entries.Iter(func(ent entry) bool {
-			key := string(ent.readKey(n.buf))
+		n.iter(func(ent *entry, buf []byte) bool {
+			key := string(ent.readKey(buf))
 			assert.That(t, key > last)
 			last = key
 			return true
@@ -43,17 +43,15 @@ func TestNode(t *testing.T) {
 			n2, err := Load(buf)
 			assert.NoError(t, err)
 
-			var keys1 []string
-			var values1 []string
-			n1.iter(func(ent entry, buf []byte) bool {
+			var keys1, values1 []string
+			n1.iter(func(ent *entry, buf []byte) bool {
 				keys1 = append(keys1, string(ent.readKey(buf)))
 				values1 = append(values1, string(ent.readValue(buf)))
 				return true
 			})
 
-			var keys2 []string
-			var values2 []string
-			n2.iter(func(ent entry, buf []byte) bool {
+			var keys2, values2 []string
+			n2.iter(func(ent *entry, buf []byte) bool {
 				keys2 = append(keys2, string(ent.readKey(buf)))
 				values2 = append(values2, string(ent.readValue(buf)))
 				return true
@@ -77,8 +75,8 @@ func BenchmarkNode(b *testing.B) {
 	b.Run("Insert", func(b *testing.B) {
 		run := func(b *testing.B, v []byte) {
 			n := New(0, 0)
-			resets := 0
 
+			b.SetBytes(numbersLength + int64(len(v)))
 			b.ReportAllocs()
 			b.ResetTimer()
 
@@ -86,73 +84,51 @@ func BenchmarkNode(b *testing.B) {
 				n.Insert(numbers[i&numbersMask], v)
 				if n.Length() > bufferSize {
 					n.Reset()
-					resets++
 				}
 			}
-
-			b.Log("iterations:", b.N, "resets:", resets)
 		}
 
 		b.Run("1MB", func(b *testing.B) { run(b, megabuf) })
 		b.Run("1KB", func(b *testing.B) { run(b, megabuf[:1<<10]) })
 		b.Run("16B", func(b *testing.B) { run(b, megabuf[:1<<4]) })
+		b.Run("0B", func(b *testing.B) { run(b, nil) })
 	})
 
 	b.Run("Write", func(b *testing.B) {
 		run := func(b *testing.B, v []byte) {
-			writes := 0
-			fresh := New(0, 0)
-			for {
-				fresh.Insert(numbers[gen.Intn(numbersSize)&numbersMask], v)
-				if fresh.Length() > bufferSize {
-					break
-				}
-				writes++
-			}
-
-			buf, err := fresh.Write(nil)
-			assert.NoError(b, err)
-			loaded, err := Load(buf)
-			assert.NoError(b, err)
-
-			if b.N == 1 {
-				b.Log("entries:", writes)
-			}
-
-			run := func(b *testing.B, n *T) {
-				buf, err := n.Write(nil)
-				assert.NoError(b, err)
-
-				b.SetBytes(int64(writes) * int64(len(v)))
-				b.ReportAllocs()
-				b.ResetTimer()
-
-				for i := 0; i < b.N; i++ {
-					n.Write(buf)
-				}
-			}
-
-			b.Run("Fresh", func(b *testing.B) { run(b, fresh) })
-			b.Run("Loaded", func(b *testing.B) { run(b, loaded) })
-		}
-
-		b.Run("512KBB", func(b *testing.B) { run(b, megabuf) })
-		b.Run("1KB", func(b *testing.B) { run(b, megabuf[:1<<10]) })
-		b.Run("16B", func(b *testing.B) { run(b, megabuf[:1<<4]) })
-	})
-
-	b.Run("Load", func(b *testing.B) {
-		b.Skip("Too cheap to matter anymore")
-
-		run := func(b *testing.B, v []byte) {
-			writes := 0
 			n := New(0, 0)
 			for {
 				n.Insert(numbers[gen.Intn(numbersSize)&numbersMask], v)
 				if n.Length() > bufferSize {
 					break
 				}
-				writes++
+			}
+			buf, err := n.Write(nil)
+			assert.NoError(b, err)
+
+			b.SetBytes(int64(len(buf)))
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				n.Write(buf)
+			}
+		}
+
+		b.Run("512KB", func(b *testing.B) { run(b, megabuf) })
+		b.Run("1KB", func(b *testing.B) { run(b, megabuf[:1<<10]) })
+		b.Run("16B", func(b *testing.B) { run(b, megabuf[:1<<4]) })
+		b.Run("0B", func(b *testing.B) { run(b, nil) })
+	})
+
+	b.Run("Load", func(b *testing.B) {
+		run := func(b *testing.B, v []byte) {
+			n := New(0, 0)
+			for {
+				n.Insert(numbers[gen.Intn(numbersSize)&numbersMask], v)
+				if n.Length() > bufferSize {
+					break
+				}
 			}
 			buf, err := n.Write(nil)
 			assert.NoError(b, err)
@@ -164,14 +140,11 @@ func BenchmarkNode(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				Load(buf)
 			}
-
-			if b.N == 1 {
-				b.Log("entries:", writes)
-			}
 		}
 
 		b.Run("512KB", func(b *testing.B) { run(b, megabuf) })
 		b.Run("1KB", func(b *testing.B) { run(b, megabuf[:1<<10]) })
 		b.Run("16B", func(b *testing.B) { run(b, megabuf[:1<<4]) })
+		b.Run("0B", func(b *testing.B) { run(b, nil) })
 	})
 }

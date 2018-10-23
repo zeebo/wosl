@@ -1,24 +1,12 @@
 package node
 
 import (
-	"bytes"
 	"encoding/binary"
 	"math"
 
 	"github.com/zeebo/errs"
 	"github.com/zeebo/wosl/internal/mon"
 )
-
-// We do O(1) loading of the buffer with a table of offsets to the nth
-// entry in the buffer, rather than going through the btree for reads.
-// plan:
-// - store count > 0 from load to signal we have that many double index.
-// - allow appends as usual, and insert into the btree as usual.
-// - make an iter method that merges in from double index and btree.
-// - make Write and IterKeys use the iter method.
-// - make buf immutable when it came from load so that it can be backed
-//   by mmap instead of reading the whole thing in.
-// - have length account for both buffers.
 
 // Error is the class that contains all the errors from this package.
 var Error = errs.Class("node")
@@ -27,26 +15,33 @@ const nodeHeaderSize = (0 +
 	4 + // next
 	4 + // height
 	4 + // pivot
-	4 + // count
+	8 + // size
 	0)
+
+// how many bytes a node header is when padded
+const nodeHeaderPadded = btreeNodeSize - btreeHeaderSize
+
+// TODO(jeff): investigate using a [][]byte (or just two []byte) so that we
+// don't have to copy potentially large amounts of data to just append a new
+// key. it may be mmap'd causing a bunch of read traffic for no reason. the
+// buf is append only, anyway, so there has to be some way to optimize.
+// maybe it'll only be slower for typical values of buf (like 4MB or less).
 
 // T is a node in a write-optimized skip list. It targets a specific size
 // and maintains entry pointers into the buf.
 type T struct {
-	buf     []byte // buffer containing the keys and values
 	next    uint32 // pointer to the next node (or 0)
 	height  uint32 // height of the node
 	pivot   uint32 // pivot for special root node
+	buf     []byte // buffer containing the keys and values
+	base    uint32 // how many bytes into buf the key/values start
 	entries btree  // btree of entries into buf
 	dirty   bool   // if modifications have happened since the last Write
-	count   uint32 // number of double index entries in cbuf
-	cbuf    []byte // buffer from Load
 }
 
 // New returns a node with a buffer size of the given size.
 func New(next, height uint32) *T {
 	return &T{
-		buf:    make([]byte, nodeHeaderSize),
 		next:   next,
 		height: height,
 	}
@@ -65,27 +60,51 @@ func Load(buf []byte) (*T, error) {
 
 	// read in the header
 	var (
-		next   = uint32(binary.BigEndian.Uint32(buf[0:4]))
-		height = uint32(binary.BigEndian.Uint32(buf[4:8]))
-		pivot  = uint32(binary.BigEndian.Uint32(buf[8:12]))
-		count  = uint32(binary.BigEndian.Uint32(buf[12:16]))
+		next      = uint32(binary.BigEndian.Uint32(buf[0:4]))
+		height    = uint32(binary.BigEndian.Uint32(buf[4:8]))
+		pivot     = uint32(binary.BigEndian.Uint32(buf[8:12]))
+		btreeSize = uint64(binary.BigEndian.Uint64(buf[12:20]))
 	)
+
+	if uint64(len(buf)) < nodeHeaderPadded+btreeSize {
+		timer.Stop()
+		return nil, Error.New("buffer too small: %d", len(buf))
+	}
+
+	entries, err := loadBtree(buf[nodeHeaderPadded:])
+	if err != nil {
+		timer.Stop()
+		return nil, Error.Wrap(err)
+	}
+
+	base := nodeHeaderPadded + entries.Length()
+	if base > math.MaxUint32 {
+		timer.Stop()
+		return nil, Error.New("internal error: btree too big")
+	}
 
 	timer.Stop()
 	return &T{
-		next:   next,
-		height: height,
-		pivot:  pivot,
-		count:  count,
-		cbuf:   buf,
+		buf:     buf,
+		next:    next,
+		height:  height,
+		pivot:   pivot,
+		base:    uint32(base),
+		entries: entries,
 	}, nil
 }
 
 // Length returns an upper bound on how many bytes writing the node would require.
-func (t *T) Length() uint32 { return uint32(len(t.buf)+len(t.cbuf)) + 4*uint32(t.entries.len) }
+func (t *T) Length() uint64 {
+	return 0 +
+		nodeHeaderPadded +
+		t.entries.Length() +
+		(uint64(len(t.buf)) - uint64(t.base)) +
+		0
+}
 
 // Count returns how many entries are in the node.
-func (t *T) Count() uint32 { return uint32(t.entries.len) + t.count }
+func (t *T) Count() uint32 { return uint32(t.entries.entries) }
 
 // Height returns the height of the node.
 func (t *T) Height() uint32 { return t.height }
@@ -110,43 +129,52 @@ func (t *T) Sully() { t.dirty = true }
 
 var writeThunk mon.Thunk // timing info for Write
 
-// Write marshals the node to the provided buffer, appending to it.
+// TODO(jeff): do we want to include the lengths before the key and value so
+// that a scan doesn't have to continue to load what the next entry is from
+// the btree? it'd be 4 bytes per entry (since we have keys are 10 bits and
+// values are 20 bits), but maybe the btree hopping isn't expensive?
+
+// Write marshals the node to the provided buffer. If it is not large enough
+// a new one is allocated. It holds on to the returned buffer, so do not
+// modify it.
 func (t *T) Write(buf []byte) ([]byte, error) {
 	timer := writeThunk.Start()
 
-	if len := int64(t.Length()); int64(cap(buf)) < len {
-		buf = make([]byte, 0, len)
+	length := t.Length()
+	if length > math.MaxUint32 {
+		return nil, Error.New("internal error: node has become too big")
 	}
 
-	count := t.Count()
+	// ensure buf is large enough
+	if uint64(cap(buf)) < uint64(length) {
+		buf = make([]byte, length)
+	} else {
+		buf = buf[:length]
+	}
 
-	buf = buf[:nodeHeaderSize]
+	btreeSize := t.entries.Length()
+
+	// write in the header
 	binary.BigEndian.PutUint32(buf[0:4], uint32(t.next))
 	binary.BigEndian.PutUint32(buf[4:8], uint32(t.height))
 	binary.BigEndian.PutUint32(buf[8:12], uint32(t.pivot))
-	binary.BigEndian.PutUint32(buf[12:16], count)
+	binary.BigEndian.PutUint64(buf[12:20], uint64(btreeSize))
 
-	// make space for the table
-	offset := len(buf)
-	buf = buf[:int64(len(buf))+int64(4*count)]
-
-	err := t.iter(func(ent entry, ebuf []byte) bool {
-		// write a table entry for where the entry lives
-		start := uint32(len(buf))
-		binary.BigEndian.PutUint32(buf[offset:], start)
-		offset += 4
-
-		// write the entry
-		hdr := ent.header()
-		buf = append(buf, hdr[:]...)
-		buf = append(buf, ent.readKey(ebuf)...)
-		buf = append(buf, ent.readValue(ebuf)...)
+	// compact the entries so that their offsets are increasing
+	data := buf[nodeHeaderPadded+btreeSize : nodeHeaderPadded+btreeSize : len(buf)]
+	t.iter(func(ent *entry, buf []byte) bool {
+		offset := uint32(len(data))
+		data = append(data, ent.readEntry(buf)...)
+		ent.offset = offset
 		return true
 	})
-	if err != nil {
-		return nil, Error.Wrap(err)
-	}
 
+	// write in the compacted btree
+	t.entries.write(buf[nodeHeaderPadded:])
+
+	// update our local state because we modified the btree entries
+	t.buf = buf
+	t.base = uint32(nodeHeaderPadded + btreeSize)
 	t.dirty = false
 
 	timer.Stop()
@@ -156,25 +184,20 @@ func (t *T) Write(buf []byte) ([]byte, error) {
 // Reset returns the node to the initial new state, even if it was
 // created from a call to Load.
 func (t *T) Reset() {
-	// TODO(jeff): we have to clear cbuf in order to make the
-	// Length call return the right results, which means we
-	// cant use it to figure out which mmap region to unmap
-	// later. Just pointing this out in case that ends up
-	// being a leak/bug.
-
-	t.buf = t.buf[:nodeHeaderSize]
+	t.buf = t.buf[:0]
+	t.base = 0
 	t.entries.reset()
 	t.dirty = false
-	t.count = 0
-	t.cbuf = nil
 }
 
 // Fits returns if a write for the given key would fit in size.
 func (t *T) Fits(key, value []byte, size uint32) bool {
 	return len(key) <= keyMask &&
 		len(value) <= valueMask &&
-		entryHeaderSize+int64(len(key))+int64(len(value))+4 < int64(size) &&
-		t.Count() < math.MaxUint32
+		// we add 10 btreeNodeSize to protect if the insert would cause a split
+		// which might allocate up to log(n) nodes. there's no way that's ever
+		// bigger than 10 (famous last words).
+		t.Length()+10*btreeNodeSize < uint64(size)
 }
 
 var insertThunk mon.Thunk // timing info for Insert
@@ -192,11 +215,9 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 	}
 
 	// build the entry that we will insert.
-	ent := newEntry(key, value, kindInsert, uint32(len(t.buf)))
+	ent := newEntry(key, value, kindInsert, uint32(len(t.buf))-t.base)
 
-	// add the entry to the buffer
-	hdr := ent.header()
-	t.buf = append(t.buf, hdr[:]...)
+	// add the data to the buffer
 	t.buf = append(t.buf, key...)
 	t.buf = append(t.buf, value...)
 
@@ -223,11 +244,9 @@ func (t *T) Delete(key []byte) (wrote bool) {
 	}
 
 	// build the entry that we will insert.
-	ent := newEntry(key, nil, kindTombstone, uint32(len(t.buf)))
+	ent := newEntry(key, nil, kindTombstone, uint32(len(t.buf))-t.base)
 
-	// add the entry to the buffer
-	hdr := ent.header()
-	t.buf = append(t.buf, hdr[:]...)
+	// add the data to the buffer
 	t.buf = append(t.buf, key...)
 
 	// insert it into the btree
@@ -238,98 +257,14 @@ func (t *T) Delete(key []byte) (wrote bool) {
 	return true
 }
 
-// iter does a merged iteration over cbuf and t.entries.
-func (t *T) iter(cb func(ent entry, buf []byte) bool) error {
-	var (
-		offset uint32 = nodeHeaderSize // offset into cbuf
-		i      uint32                  // index into count
-
-		cex     bool // if cprefix/ckey is valid
-		cprefix uint32
-		ckey    []byte // current key from cbuf
-		cent    entry
-
-		err error
-	)
-
-	// merge cbuf along with the btree
-	t.entries.Iter(func(ent entry) bool {
-		if i >= t.count {
-			return cb(ent, t.buf)
-		}
-
-		var ekey []byte
-		eprefix := binary.BigEndian.Uint32(ent.prefix[:])
-
-		for {
-			if !cex {
-				eoff := binary.BigEndian.Uint32(t.cbuf[offset:])
-
-				var ok bool
-				cent, ok = readEntry(eoff, t.cbuf)
-				if !ok {
-					err = Error.New("invalid loaded entry buffer")
-					return false
-				}
-
-				cprefix = binary.BigEndian.Uint32(cent.prefix[:])
-			}
-
-			cmp := compare(cprefix, eprefix)
-			if cmp == 0 {
-				if ckey == nil {
-					ckey = cent.readKey(t.cbuf)
-				}
-				if ekey == nil {
-					ekey = ent.readKey(t.buf)
-				}
-				cmp = bytes.Compare(ckey, ekey)
-			}
-			switch cmp {
-			case -1: // ckey is earlier. send it off
-				if !cb(cent, t.cbuf) {
-					return false
-				}
-				ckey, cex, i, offset = nil, false, i+1, offset+4
-
-			case 0: // same. use entry because it's new
-				if !cb(ent, t.buf) {
-					return false
-				}
-				ckey, cex, i, offset = nil, false, i+1, offset+4
-				return true // move to next entry
-
-			case 1: // ent is earlier. send it off
-				if !cb(ent, t.buf) {
-					return false
-				}
-				return true // move to next entry
-			}
-		}
+// iter is a helper to iterate over all of the entries with the appropriate buffer
+// for their offset. It is usually not used internally to avoid the double function
+// call overhead.
+func (t *T) iter(cb func(ent *entry, buf []byte) bool) error {
+	base := t.buf[t.base:]
+	t.entries.Iter(func(ent *entry) bool {
+		return cb(ent, base)
 	})
-	if err != nil {
-		return err
-	}
-
-	// send one off if we already loaded it
-	if ckey != nil {
-		if !cb(cent, t.cbuf) {
-			return nil
-		}
-		i, offset = i+1, offset+4
-	}
-
-	// finish off the cbuf
-	for ; i < t.count; i, offset = i+1, offset+4 {
-		eoff := binary.BigEndian.Uint32(t.cbuf[offset:])
-		ent, ok := readEntry(eoff, t.cbuf)
-		if !ok {
-			return Error.New("invalid loaded entry buffer")
-		} else if !cb(ent, t.cbuf) {
-			return nil
-		}
-	}
-
 	return nil
 }
 
@@ -339,43 +274,33 @@ func (t *T) iter(cb func(ent entry, buf []byte) bool) error {
 func (t *T) Flush(cb func(key []byte, pivot uint32) (uint32, error)) error {
 	var (
 		bu   btreeBulk
-		nbuf = make([]byte, nodeHeaderSize)
+		nbuf []byte
+		base = t.buf[t.base:]
 	)
 
-	var uerr error
-	err := t.iter(func(ent entry, buf []byte) bool {
-		key := ent.readKey(buf)
-
+	var err error
+	t.entries.Iter(func(ent *entry) bool {
 		var npivot uint32
-		if npivot, uerr = cb(key, ent.pivot); uerr != nil || npivot == 0 {
+		if npivot, err = cb(ent.readKey(base), ent.pivot); err != nil {
 			return false
+		} else if npivot == 0 {
+			return true
 		}
 
-		value := ent.readValue(buf)
+		nbuf = append(nbuf, ent.readEntry(base)...)
 		ent.pivot = npivot
 		ent.offset = uint32(len(nbuf))
-
-		hdr := ent.header()
-		nbuf = append(nbuf, hdr[:]...)
-		nbuf = append(nbuf, key...)
-		nbuf = append(nbuf, value...)
-
-		bu.append(ent)
+		bu.append(*ent)
 		return true
 	})
 	if err != nil {
 		return Error.Wrap(err)
 	}
-	if uerr != nil {
-		return Error.Wrap(err)
-	}
 
-	// use the bulk loaded btree and buffer
 	t.buf = nbuf
 	t.entries = bu.done()
+	t.base = 0
 	t.dirty = true
-	t.count = 0
-	t.cbuf = nil
 
 	return nil
 }

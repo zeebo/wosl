@@ -11,7 +11,7 @@ const (
 	invalidNode    = math.MaxUint32
 	payloadEntries = 31 // 512 byte nodes
 	payloadSplit   = payloadEntries / 2
-	btreeNodeSize  = int(unsafe.Sizeof(btreeNode{}))
+	btreeNodeSize  = uint64(unsafe.Sizeof(btreeNode{}))
 )
 
 // N.B. it is important that btreeNode does not contain pointers, so that we can

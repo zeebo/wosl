@@ -20,7 +20,7 @@ func TestBtreeBulk(t *testing.T) {
 		bt := bu.done()
 
 		i := 0
-		bt.Iter(func(ent entry) bool {
+		bt.Iter(func(ent *entry) bool {
 			key := string(ent.readKey(buf))
 			assert.Equal(t, key, fmt.Sprint(i))
 			i++
@@ -36,7 +36,7 @@ func TestBtreeBulk(t *testing.T) {
 		bu.append(ent)
 		bt := bu.done()
 
-		bt.Iter(func(ent entry) bool {
+		bt.Iter(func(ent *entry) bool {
 			assert.Equal(t, string(ent.readKey(buf)), "0")
 			return true
 		})
@@ -46,7 +46,7 @@ func TestBtreeBulk(t *testing.T) {
 		var bu btreeBulk
 		bt := bu.done()
 
-		bt.Iter(func(ent entry) bool {
+		bt.Iter(func(ent *entry) bool {
 			t.Fatal("expected no entries")
 			return true
 		})

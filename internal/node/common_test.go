@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	numbersShift = 16
-	numbersSize  = 1 << numbersShift
-	numbersMask  = numbersSize - 1
+	numbersShift  = 16
+	numbersSize   = 1 << numbersShift
+	numbersMask   = numbersSize - 1
+	numbersLength = 5
 )
 
 var (
@@ -22,14 +23,15 @@ var (
 func init() {
 	numbers = make([][]byte, numbersSize)
 	for i := range numbers {
-		numbers[i] = []byte(fmt.Sprint(gen.Intn(numbersSize)))
+		for len(numbers[i]) != numbersLength {
+			numbers[i] = []byte(fmt.Sprint(gen.Intn(numbersSize)))
+		}
 	}
 }
 
 func appendEntry(buf *[]byte, key, value string) (entry, []byte) {
 	ent := newEntry([]byte(key), []byte(value), kindInsert, uint32(len(*buf)))
-	hdr := ent.header()
-	*buf = append(*buf, hdr[:]...)
 	*buf = append(*buf, key...)
+	*buf = append(*buf, value...)
 	return ent, []byte(*buf)
 }

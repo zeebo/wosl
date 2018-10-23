@@ -10,10 +10,10 @@ import (
 
 // btree is an in memory B+ tree tuned to store entries
 type btree struct {
-	root  *btreeNode
-	rid   uint32
-	len   int
-	nodes []*btreeNode
+	root    *btreeNode
+	rid     uint32
+	entries int
+	nodes   []*btreeNode
 }
 
 // reset clears the btree back to an empty state
@@ -129,7 +129,7 @@ func (b *btree) Insert(ent entry, buf []byte) {
 	if b.root == nil {
 		b.root, b.rid = b.alloc(true)
 		b.root.insertEntry(key, ent, buf)
-		b.len++
+		b.entries++
 		return
 	}
 
@@ -137,7 +137,7 @@ func (b *btree) Insert(ent entry, buf []byte) {
 	n, nid := b.search(key, buf)
 	for {
 		if n.insertEntry(key, ent, buf) && n.leaf {
-			b.len++
+			b.entries++
 		}
 
 		// easy case: if the node still has enough room, we're done.
@@ -184,7 +184,7 @@ func (b *btree) Insert(ent entry, buf []byte) {
 func (b *btree) append(n *btreeNode, nid uint32, ent entry) {
 	for {
 		n.appendEntry(ent)
-		b.len++
+		b.entries++
 
 		// easy case: if the node still has enough room, we're done.
 		if n.count < payloadEntries {
@@ -225,7 +225,7 @@ func (b *btree) append(n *btreeNode, nid uint32, ent entry) {
 }
 
 // Iter calls the callback with all of the entries in order.
-func (b *btree) Iter(cb func(ent entry) bool) {
+func (b *btree) Iter(cb func(ent *entry) bool) {
 	n := b.root
 	if b.root == nil {
 		return
@@ -241,7 +241,7 @@ func (b *btree) Iter(cb func(ent entry) bool) {
 
 	for {
 		for i := uint8(0); i < n.count; i++ {
-			if !cb(n.payload[i]) {
+			if !cb(&n.payload[i]) {
 				return
 			}
 		}
@@ -252,25 +252,78 @@ func (b *btree) Iter(cb func(ent entry) bool) {
 	}
 }
 
-// size returns how many bytes writing out the btree would take
-func (b *btree) size() int { return btreeNodeSize * len(b.nodes) }
+// btreeHeaderSize  is the number of bytes the btree header takes up
+const btreeHeaderSize = 0 +
+	4 + // root id
+	8 + // number of nodes
+	8 + // number of entries
+	0
+
+// Length returns how many bytes writing out the btree would take
+func (b *btree) Length() uint64 { return btreeHeaderSize + btreeNodeSize*uint64(len(b.nodes)) }
 
 // write uses the storage in buf to write the btree if possible. if not
 // possible, it allocates a new slice.
 func (b *btree) write(buf []byte) []byte {
-	if size := b.size(); cap(buf) < size {
-		buf = make([]byte, size)
+	length := b.Length()
+	if uint64(cap(buf)) < length {
+		buf = make([]byte, length)
 	} else {
-		buf = buf[:size]
+		buf = buf[:length]
 	}
 
-	w := buf
+	binary.LittleEndian.PutUint32(buf[0:4], b.rid)
+	binary.LittleEndian.PutUint64(buf[4:12], uint64(len(b.nodes)))
+	binary.LittleEndian.PutUint64(buf[12:20], uint64(b.entries))
+
+	w := buf[btreeHeaderSize:]
 	for _, n := range b.nodes {
-		// TODO(jeff): be explicit with encoding/binary and check the perf
-		// difference. probably not much.
+		// TODO(jeff): check how expensive encoding/binary is.
 		*(*btreeNode)(unsafe.Pointer(&w[0])) = *n
 		w = w[btreeNodeSize:]
 	}
 
 	return buf
+}
+
+// loadBtree loads up a btree from the provided buffer. it continues to use
+// the buffer as a backing store until it must grow.
+func loadBtree(buf []byte) (btree, error) {
+	if len(buf) < btreeHeaderSize {
+		return btree{}, Error.New("buffer too small for btree")
+	}
+
+	var (
+		rid     = binary.LittleEndian.Uint32(buf[0:4])
+		count   = binary.LittleEndian.Uint64(buf[4:12])
+		entries = binary.LittleEndian.Uint64(buf[12:20])
+	)
+
+	if uint64(rid) >= count {
+		return btree{}, Error.New("root id out of range. root:%d count:%d",
+			rid, count)
+	}
+	if uint64(int(entries)) != entries || int(entries) < 0 {
+		return btree{}, Error.New("invalid number of entries: %d",
+			entries)
+	}
+	if uint64(len(buf)) < btreeHeaderSize+uint64(btreeNodeSize)*count {
+		return btree{}, Error.New("buffer too small for %d nodes: %d",
+			count, len(buf))
+	}
+
+	r := buf[btreeHeaderSize:]
+	nodes := make([]*btreeNode, count)
+	for i := range nodes {
+		// TODO(jeff): check how expensive encoding/binary is.
+		nodes[i] = (*btreeNode)(unsafe.Pointer(&r[0]))
+		r = r[btreeNodeSize:]
+	}
+
+	return btree{
+		root:    nodes[rid],
+		rid:     rid,
+		entries: int(entries),
+		nodes:   nodes,
+	}, nil
 }

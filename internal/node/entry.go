@@ -1,6 +1,8 @@
 package node
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+)
 
 const (
 	// the different kinds of entries. kindSentinel is used for the special
@@ -48,8 +50,8 @@ func (e kvk) value() uint32 { return uint32(e>>valueShift) & valueMask }
 func (e kvk) kind() uint8   { return uint8(e>>kindShift) & kindMask }
 
 const entryHeaderSize = (0 +
-	4 + // pivot
 	4 + // kvk
+	4 + // pivot
 	4 + // prefix
 	0)
 
@@ -106,12 +108,16 @@ func (e entry) header() (hdr [entryHeaderSize]byte) {
 
 // readKey returns a slice of the buffer that contains the key.
 func (e entry) readKey(buf []byte) []byte {
-	start := entryHeaderSize + e.offset
-	return buf[start : start+uint32(e.key())]
+	return buf[e.offset : e.offset+uint32(e.key())]
 }
 
 // readKey returns a slice of the buffer that contains the value.
 func (e entry) readValue(buf []byte) []byte {
-	start := entryHeaderSize + e.offset + uint32(e.key())
+	start := e.offset + uint32(e.key())
 	return buf[start : start+e.value()]
+}
+
+// readEntry returns a byte containing the combined key and value.
+func (e entry) readEntry(buf []byte) []byte {
+	return buf[e.offset : e.offset+uint32(e.key())+e.value()]
 }
