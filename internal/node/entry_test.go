@@ -15,12 +15,4 @@ func TestEntry(t *testing.T) {
 		assert.Equal(t, ent.kind(), 3)
 		assert.Equal(t, ent.offset, 4)
 	})
-
-	t.Run("Write+Read", func(t *testing.T) {
-		ent1 := newEntry(make([]byte, 1), make([]byte, 2), 3, 4)
-		hdr := ent1.header()
-		ent2, ok := readEntry(4, append(make([]byte, 4), hdr[:]...))
-		assert.That(t, ok)
-		assert.Equal(t, ent1, ent2)
-	})
 }

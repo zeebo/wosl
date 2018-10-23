@@ -12,13 +12,13 @@ func dump(b *btree, buf []byte) {
 		if n.leaf {
 			return
 		}
-		for i := uint8(0); i < n.count; i++ {
+		for i := uint16(0); i < n.count; i++ {
 			order = append(order, n.payload[i].pivot)
 		}
 		if n.next != invalidNode {
 			order = append(order, n.next)
 		}
-		for i := uint8(0); i < n.count; i++ {
+		for i := uint16(0); i < n.count; i++ {
 			cid := n.payload[i].pivot
 			twalk(b.nodes[cid], cid)
 		}
@@ -31,7 +31,7 @@ func dump(b *btree, buf []byte) {
 		fmt.Printf(`node%d [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0"><TR>`, nid)
 		fmt.Printf(`<TD PORT="fb"> </TD><TD PORT="fn">n%d (%d)</TD>`, nid, n.count)
 		if !n.leaf || dumpLeaf {
-			for i := uint8(0); i < n.count; i++ {
+			for i := uint16(0); i < n.count; i++ {
 				fmt.Printf(`<TD PORT="f%d">%s`, i, n.payload[i].readKey(buf))
 				if n.leaf {
 					fmt.Printf(`:%d`, n.payload[i].value())
@@ -42,7 +42,7 @@ func dump(b *btree, buf []byte) {
 		fmt.Println(`<TD PORT="fe"> </TD></TR></TABLE>>];`)
 
 		if !n.leaf {
-			for i := uint8(0); i < n.count; i++ {
+			for i := uint16(0); i < n.count; i++ {
 				fmt.Printf("node%d:f%d:s -> node%d:fn:n;\n", nid, i, n.payload[i].pivot)
 			}
 		}
@@ -87,7 +87,7 @@ func dump(b *btree, buf []byte) {
 			return
 		}
 		fmt.Printf("{rank=same ")
-		for i := uint8(0); i < n.count; i++ {
+		for i := uint16(0); i < n.count; i++ {
 			fmt.Printf("node%d ", n.payload[i].pivot)
 		}
 		if n.next != invalidNode {
@@ -95,7 +95,7 @@ func dump(b *btree, buf []byte) {
 		}
 		fmt.Println("}")
 
-		for i := uint8(0); i < n.count; i++ {
+		for i := uint16(0); i < n.count; i++ {
 			walk(b.nodes[n.payload[i].pivot])
 		}
 		if n.next != invalidNode {

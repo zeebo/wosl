@@ -30,7 +30,7 @@ func TestBtreeNode(t *testing.T) {
 
 		sort.Strings(keys)
 
-		for i := uint8(0); i < n.count; i++ {
+		for i := uint16(0); i < n.count; i++ {
 			assert.Equal(t, string(n.payload[i].readKey(buf)), keys[i])
 		}
 	})

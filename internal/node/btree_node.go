@@ -9,7 +9,7 @@ import (
 
 const (
 	invalidNode    = math.MaxUint32
-	payloadEntries = 31 // 512 byte nodes
+	payloadEntries = 127
 	payloadSplit   = payloadEntries / 2
 	btreeNodeSize  = uint64(unsafe.Sizeof(btreeNode{}))
 )
@@ -22,9 +22,9 @@ type btreeNode struct {
 	next    uint32  // pointer to the next node (or if not leaf, the rightmost edge)
 	prev    uint32  // backpointer from next node (unused if not leaf)
 	parent  uint32  // set to invalidNode on the root node
-	count   uint8   // used values in payload
+	count   uint16  // used values in payload
 	leaf    bool    // set if is a leaf
-	_       [2]byte // padding
+	_       [1]byte // padding
 	payload [payloadEntries]entry
 }
 
@@ -34,7 +34,7 @@ func (n *btreeNode) insertEntry(key []byte, ent entry, buf []byte) bool {
 	prefix := binary.BigEndian.Uint32(ent.prefix[:])
 
 	// binary search to find the appropriate child
-	i, j := uint8(0), n.count
+	i, j := uint16(0), n.count
 	for i < j {
 		h := (i + j) >> 1
 		enth := n.payload[h]

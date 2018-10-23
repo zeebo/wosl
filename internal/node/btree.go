@@ -31,7 +31,7 @@ func (b *btree) search(key, buf []byte) (*btreeNode, uint32) {
 
 	for !n.leaf {
 		// binary search to find the appropriate child
-		i, j := uint8(0), n.count
+		i, j := uint16(0), n.count
 		for i < j {
 			h := (i + j) >> 1
 			enth := n.payload[h]
@@ -87,7 +87,7 @@ func (b *btree) split(n *btreeNode, nid uint32) (*btreeNode, uint32) {
 	s.parent = n.parent
 
 	// split the entries between the two nodes
-	s.count = uint8(copy(s.payload[:], n.payload[:payloadSplit]))
+	s.count = uint16(copy(s.payload[:], n.payload[:payloadSplit]))
 
 	copyAt := payloadSplit
 	if !n.leaf {
@@ -101,7 +101,7 @@ func (b *btree) split(n *btreeNode, nid uint32) (*btreeNode, uint32) {
 		// additionally, every element that it points at needs to have
 		// their parent updated
 		b.nodes[s.next].parent = sid
-		for i := uint8(0); i < s.count; i++ {
+		for i := uint16(0); i < s.count; i++ {
 			b.nodes[s.payload[i].pivot].parent = sid
 		}
 	} else {
@@ -113,7 +113,7 @@ func (b *btree) split(n *btreeNode, nid uint32) (*btreeNode, uint32) {
 		}
 		n.prev = sid
 	}
-	n.count = uint8(copy(n.payload[:], n.payload[copyAt:]))
+	n.count = uint16(copy(n.payload[:], n.payload[copyAt:]))
 
 	timer.Stop()
 	return s, sid
@@ -240,7 +240,7 @@ func (b *btree) Iter(cb func(ent *entry) bool) {
 	}
 
 	for {
-		for i := uint8(0); i < n.count; i++ {
+		for i := uint16(0); i < n.count; i++ {
 			if !cb(&n.payload[i]) {
 				return
 			}

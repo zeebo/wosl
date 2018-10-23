@@ -17,7 +17,8 @@ const (
 // we use another uint32 to describe the offset into some stream
 // that the key + value are stored. we use 4 more bytes to store
 // the prefix of the key so that we can do comparisons on those
-// without having to read the key in some cases.
+// without having to read the key in some cases. this makes an
+// entry a compact 16 bytes, allowing 4 to fit in a cache line.
 
 const (
 	keyShift = 0
@@ -33,22 +34,6 @@ const (
 	kindMask  = 1<<kindBits - 1
 )
 
-// kvk is a bit packed key/value/kind into 32 bits.
-type kvk uint32
-
-// newKVK returns an kvk with the values packed. It will truncate
-// any values that would not fit.
-func newKVK(key uint16, value uint32, kind uint8) kvk {
-	return kvk(
-		uint32(key&keyMask)<<keyShift |
-			uint32(value&valueMask)<<valueShift |
-			uint32(kind&kindMask)<<kindShift)
-}
-
-func (e kvk) key() uint16   { return uint16(e>>keyShift) & keyMask }
-func (e kvk) value() uint32 { return uint32(e>>valueShift) & valueMask }
-func (e kvk) kind() uint8   { return uint8(e>>kindShift) & kindMask }
-
 const entryHeaderSize = (0 +
 	4 + // kvk
 	4 + // pivot
@@ -57,7 +42,7 @@ const entryHeaderSize = (0 +
 
 // entry is kept in sorted order in a node's memory buffer.
 type entry struct {
-	kvk            // 10 bits of key, 20 bits of value, 2 bits of kind.
+	kvk    uint32  // bitpacked key+value+kind
 	pivot  uint32  // 0 means no pivot: there is no block 0.
 	prefix [4]byte // first four bytes of the key
 	offset uint32  // offset into the stream
@@ -68,35 +53,29 @@ func newEntry(key, value []byte, kind uint8, offset uint32) entry {
 	var prefix [4]byte
 	copy(prefix[:], key)
 
+	kvk := uint32(len(key)&keyMask)<<keyShift |
+		uint32(len(value)&valueMask)<<valueShift |
+		uint32(kind&kindMask)<<kindShift
+
 	return entry{
+		kvk:    kvk,
 		pivot:  0,
-		kvk:    newKVK(uint16(len(key)), uint32(len(value)), kind),
 		prefix: prefix,
 		offset: offset,
 	}
 }
 
-// readEntry returns an entry from the beginning of the buf given that
-// the buf is offset bytes in.
-func readEntry(offset uint32, buf []byte) (entry, bool) {
-	if int64(len(buf)) < entryHeaderSize+int64(offset) {
-		return entry{}, false
-	}
-	buf = buf[offset:]
+// key returns how many bytes of key there are.
+func (e entry) key() uint32 { return uint32(e.kvk>>keyShift) & keyMask }
 
-	var prefix [4]byte
-	copy(prefix[:], buf[8:12])
+// value returns how many bytes of value there are.
+func (e entry) value() uint32 { return uint32(e.kvk>>valueShift) & valueMask }
 
-	return entry{
-		kvk:    kvk(binary.LittleEndian.Uint32(buf[0:4])),
-		pivot:  uint32(binary.LittleEndian.Uint32(buf[4:8])),
-		prefix: prefix,
-		offset: offset,
-	}, true
-}
+// kind returns the entry kind.
+func (e entry) kind() uint8 { return uint8(e.kvk>>kindShift) & kindMask }
 
-// size returns how many bytes the entry consumes
-func (e entry) size() int64 { return entryHeaderSize + int64(e.key()) + int64(e.value()) }
+// size returns how many bytes the entry consumes as.
+func (e entry) size() uint64 { return entryHeaderSize + uint64(e.key()) + uint64(e.value()) }
 
 // header returns an array of bytes containing the entry header.
 func (e entry) header() (hdr [entryHeaderSize]byte) {
@@ -108,16 +87,16 @@ func (e entry) header() (hdr [entryHeaderSize]byte) {
 
 // readKey returns a slice of the buffer that contains the key.
 func (e entry) readKey(buf []byte) []byte {
-	return buf[e.offset : e.offset+uint32(e.key())]
+	return buf[e.offset : e.offset+e.key()]
 }
 
 // readKey returns a slice of the buffer that contains the value.
 func (e entry) readValue(buf []byte) []byte {
-	start := e.offset + uint32(e.key())
+	start := e.offset + e.key()
 	return buf[start : start+e.value()]
 }
 
 // readEntry returns a byte containing the combined key and value.
 func (e entry) readEntry(buf []byte) []byte {
-	return buf[e.offset : e.offset+uint32(e.key())+e.value()]
+	return buf[e.offset : e.offset+e.key()+e.value()]
 }
