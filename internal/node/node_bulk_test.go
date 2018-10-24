@@ -13,7 +13,7 @@ func TestNodeBulk(t *testing.T) {
 
 		for i := 0; i < 1000; i++ {
 			key := []byte(fmt.Sprintf("%04d", i))
-			assert.That(t, bu.Append(key, nil, false))
+			assert.That(t, bu.Append(key, nil, false, 0))
 		}
 		n := bu.Done(0, 0)
 
@@ -44,7 +44,7 @@ func BenchmarkNodeBulk(b *testing.B) {
 				if !bu.Fits(keys[i], v, bufferSize) {
 					bu.Reset()
 				}
-				bu.Append(keys[i], v, true)
+				bu.Append(keys[i], v, true, 0)
 			}
 		}
 

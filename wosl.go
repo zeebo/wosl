@@ -1,6 +1,8 @@
 package wosl
 
 import (
+	"bytes"
+	"fmt"
 	"math"
 
 	"github.com/cespare/xxhash"
@@ -66,6 +68,7 @@ func NewEps(eps float64, cache Cache) (*T, error) {
 	} else if buf == nil {
 		root = node.New(0, 1)
 		root.SetPivot(invalidBlock)
+		maxBlock = 1
 	} else if root, err = node.Load(buf); err != nil {
 		return nil, Error.Wrap(err)
 	}
@@ -97,10 +100,7 @@ var insertThunk mon.Thunk // timing for Insert
 func (t *T) Insert(key, value []byte) error {
 	timer := insertThunk.Start()
 
-	// TODO(jeff): log ahead the values into some journal per block.
-	// or something. somewhere needs to handle it. for now, just
-	// record the hash of the value lol.
-	val := xxhash.Sum64(value) >> 20
+	fmt.Println("insert", t.height(key), string(key))
 
 	// Compute the height for the key to check if we need to allocate
 	// new roots. This should be exceedinly rare, so it's ok if it's
@@ -113,11 +113,34 @@ func (t *T) Insert(key, value []byte) error {
 		}
 	}
 
-	// do a recursive/flushing insert of the key starting at the root.
-	if _, err := t.insert(t.root, rootBlock, key, val); err != nil {
+	// insert the value. if it cannot be fit, then there's nothing to do.
+	if !t.root.Insert(key, value) {
+		timer.Stop()
+		return Error.New("entry too large to fit")
+	}
+
+	// if we're still inside the block range, we're done!
+	if t.root.Length() < uint64(t.b) {
+		timer.Stop()
+		return nil
+	}
+
+	// we're going to flush the root, write back all of the dirty data.
+	if err := t.cache.Flush(); err != nil {
 		timer.Stop()
 		return Error.Wrap(err)
 	}
+
+	// we don't have access to the parent yet, but that's ok for the
+	// first time around, since we know the first insert is due to the
+	// root, and the root never has to split or has any incoming edges
+	// that need to be fixed.
+	fmt.Println("start flush")
+	if err := t.flush(t.root, rootBlock, nil); err != nil {
+		timer.Stop()
+		return Error.Wrap(err)
+	}
+	fmt.Println("end flush")
 
 	timer.Stop()
 	return nil
@@ -131,6 +154,7 @@ func (t *T) newRoot() error {
 		return Error.Wrap(err)
 	}
 
+	t.cache.Add(t.root, block)
 	t.root = node.New(0, t.root.Height()+1)
 	t.root.SetPivot(block)
 	return nil
@@ -158,48 +182,20 @@ func (t *T) writeNode(n *node.T, block uint32) error {
 	return nil
 }
 
-// insert places the key/value into the node at the given block. If the node does not
-// contain enough space, it is flushed, recursively inserting elements into its children.
-func (t *T) insert(n *node.T, block uint32, key []byte, val uint64) (bool, error) {
-	// if we're smaller than the
-	if n.Fits(key, t.b) && n.Insert(key, val) {
-		return false, nil
-	}
-
-	// if we're a leaf the parent calling insert needs to handle the
-	// flush specially.
-	if n.Height() == 0 {
-		return true, nil
-	}
-
-	// TODO(jeff): have to be VERY careful about concurrency here. for now
-	// assume everything is serialized behind a mutex. there also may be
-	// some ways to flush less. gotta figure that one out. it also may be
-	// better to flush AFTER the insertion. gotta figure that out, too.
-
-	// we have to flush the root. first write back all of the dirty data.
-	if n == t.root {
-		if err := t.cache.Flush(); err != nil {
-			return false, Error.Wrap(err)
-		}
-	}
-
-	// otherwise, flush and attempt another insert.
-	if err := t.flush(n, block); err != nil {
-		return false, Error.Wrap(err)
-	} else if !n.Insert(key, val) {
-		return false, Error.New("entry too large to fit")
-	} else {
-		return false, nil
-	}
-}
-
 var flushThunk mon.Thunk // timing for flush
 
 // flush distributes the elements of the node's buffer among the
-// buffers of the node's children. It should not be called on leaves.
-func (t *T) flush(n *node.T, block uint32) error {
-	timer := flushThunk.Start()
+// buffers of the node's children. If the flush causes any splits
+// it will fix up the pointers to entries inside of the node in
+// the provided parents slice. Any children that it flushed to
+// that went over the block size are then recursively flushed.
+// There is a special flushing strategy for nodes at height
+// of 1 where instead of recrusively flushing the leaves, they
+// are rebalanced based on the pivots of the node.
+func (t *T) flush(n *node.T, block uint32, parents []uint32) error {
+	fmt.Println("flush", block, n.Height())
+
+	defer flushThunk.Start().Stop()
 
 	// assert that we don't flush a leaf node.
 	debug.Assert("flush leaf node", func() bool { return n.Height() != 0 })
@@ -208,9 +204,9 @@ func (t *T) flush(n *node.T, block uint32) error {
 	// no leaf for it yet? if so, allocate a leaf node and put it
 	// in the cache to be written back if dirtied.
 	if n.Pivot() == invalidBlock {
-		block := t.maxBlock + 1
-		t.cache.Add(node.New(0, 0), block)
-		n.SetPivot(block)
+		newBlock := t.maxBlock + 1
+		t.cache.Add(node.New(0, 0), newBlock)
+		n.SetPivot(newBlock)
 		t.maxBlock++
 	}
 
@@ -219,38 +215,209 @@ func (t *T) flush(n *node.T, block uint32) error {
 	// be reading the key anyway, and computing the hash is like
 	// nanoseconds, so it won't matter. maybe it does!?
 
+	type split struct {
+		block  uint32
+		n      *node.T
+		leader []byte
+	}
+
 	var ( // state for the iteration
-		le    lease.T
-		child = n.Pivot()
-		nh    = n.Height()
+		cle    lease.T     // current child lease
+		cblock = n.Pivot() // block of current child
+		cfix   = false     // if the child needs fixing
+		cn     *node.T     // current child node
+
+		nh       = n.Height() // height of the current node
+		fixups   []uint32     // which children we need to fix up
+		leader   []byte       // leader that caused the start of the split
+		splits   []split      // which splits have happened
+		bulk     node.Bulk    // building any splits
+		maxBlock = t.maxBlock // current max block
 	)
 
-	err := n.Flush(func(key []byte, pivot uint32) (uint32, error) {
-		// update which child node we will insert the entry into
-		if pivot != 0 && child != pivot {
-			le.Close()
-			child = pivot
+	fmt.Println("initial child", block, "->", cblock)
+
+	err := n.Flush(func(ent *node.Entry, key, value []byte) error {
+		// if the entry is a pivot, then the child that we
+		// flush to must be updated to it.
+		if pivot := ent.Pivot(); pivot != 0 && cblock != pivot {
+			cle.Close()
+			cblock = pivot
+			cfix = false
+			cn = nil
+			fmt.Println("set child", string(key), t.height(key), block, "->", pivot)
 		}
-		if le.Zero() {
+
+		// if we have no lease, get one so that we can flush the
+		// entry to the child if necessary.
+		if cn == nil {
 			var err error
-			le, err = t.cache.Get(child)
+			cle, err = t.cache.Get(cblock)
 			if err != nil {
-				return 0, Error.Wrap(err)
+				return Error.Wrap(err)
+			}
+			cn = cle.Node()
+		}
+
+		// insert the data into the child node. if it causes it to
+		// be larger than the block size, record that we'll need
+		// to fix it up after the flush. if we're at height 1, we
+		// need to do a rebalance step at the end, so keep track
+		// of every node that we inserted into.
+		if !cn.Insert(key, value) {
+			return Error.New("entry too large to fit")
+		}
+		if !cfix && (cn.Length() >= uint64(t.b) || nh == 1) {
+			cfix = true
+			fixups = append(fixups, cblock)
+		}
+
+		// TODO(jeff): how do we handle merges? should check
+		// if the entry is a tombstone, and handle that.
+		// TODO(jeff): if some child has enough delete entries
+		// destined for it, we need to immediately flush.
+
+		// if the height of the entry isgreater than or equal to
+		// our node's height, we should make the entry a pivot to
+		// the child. if the height is strictly greater, we need
+		// to split.
+		if h := t.height(key); h >= nh {
+			ent.SetPivot(cblock)
+			fmt.Println("flush pivot", string(key), h, "from", block, "->", cblock)
+
+			if h > nh {
+				// if we already have a split in progress, finish
+				// it off and save it
+				if leader != nil {
+					maxBlock++
+					splits = append(splits, split{
+						block:  maxBlock,
+						n:      bulk.Done(n.Next(), n.Height()),
+						leader: leader,
+					})
+					bulk.Reset()
+				}
+
+				// update the leader that started the split
+				leader = key
 			}
 		}
 
-		// insert the entry into the
-		h := t.height(key)
-		if nh <= h { // make this entry a pivot for the child
-			pivot = child
+		// if we're in a split, append it to the current bulk node
+		// and then set the pivot to zero to truncate it from our filter.
+		if leader != nil {
+			if !bulk.Append(key, value, ent.Tombstone(), ent.Pivot()) {
+				return Error.New("entry too large to fit")
+			}
+			ent.SetPivot(0)
 		}
 
-		return pivot, nil
+		return nil
 	})
-	le.Close()
+	cle.Close()
+	if err != nil {
+		return Error.Wrap(err)
+	}
 
-	timer.Stop()
-	return Error.Wrap(err)
+	// if we're in a split, finish up the split state.
+	if leader != nil {
+		maxBlock++
+		splits = append(splits, split{
+			block:  maxBlock,
+			n:      bulk.Done(n.Next(), n.Height()),
+			leader: leader,
+		})
+
+		// add the new split nodes to the cache
+		for _, split := range splits {
+			fmt.Println("adding", split.block, "from bulk split")
+			t.cache.Add(split.n, split.block)
+		}
+
+		// loop over all of the parents and fix any pivots to the current
+		// node to point at any split nodes if necessary.
+		pivot, tmpSplits := block, splits
+		for _, parent := range parents {
+			le, err := t.cache.Get(parent)
+			if err != nil {
+				return Error.Wrap(err)
+			}
+			le.Node().Update(func(ent *node.Entry, key []byte) bool {
+				// if the pivot does not point at us, it's not part
+				// of the split, so just continue.
+				if ent.Pivot() != block {
+					return true
+				}
+
+				// if there are splits to consume left, check to see if the key
+				// has moved to the next leader. if so,
+				if len(tmpSplits) > 0 && bytes.Compare(key, tmpSplits[0].leader) >= 0 {
+					pivot, tmpSplits = tmpSplits[0].block, tmpSplits[1:]
+				}
+
+				fmt.Println("split pivot", string(key), t.height(key), "from", parent, "->", pivot)
+				ent.SetPivot(pivot)
+				return true
+			})
+			le.Close()
+		}
+
+		// update the maxBlock since we allocated some blocks
+		t.maxBlock = maxBlock
+	}
+
+	// run any fixups that are needed.
+	if len(fixups) > 0 {
+		fmt.Println("start fixup")
+
+		// now that we have some splits, we have to update the set of
+		// parents for all of the children we're fixing up.
+		parents := make([]uint32, 1, 1+len(splits))
+		parents[0] = block
+		for _, split := range splits {
+			parents = append(parents, split.block)
+		}
+
+		if nh == 1 {
+			if err := t.rebalance(parents, fixups); err != nil {
+				return Error.Wrap(err)
+			}
+		} else {
+			for _, fixup := range fixups {
+				fmt.Println("fixup", fixup)
+				le, err := t.cache.Get(fixup)
+				if err != nil {
+					return Error.Wrap(err)
+				}
+
+				err = t.flush(le.Node(), le.Block(), parents)
+				le.Close()
+
+				if err != nil {
+					return Error.Wrap(err)
+				}
+			}
+		}
+
+		fmt.Println("end fixup")
+	}
+
+	// TODO(jeff): there are issues with partial failures and the next pointer
+	// we need to flush every node in reverse order so that we don't update
+	// the first node's next pointer until the end. additionally, the parent
+	// pointer updates must happen after.
+
+	return nil
+}
+
+// rebalance distributes elements in the children according to the pivots
+// in the parents.
+func (t *T) rebalance(parents, children []uint32) error {
+	fmt.Println("rebalance", parents, children)
+	// TODO(jeff): rebalance needs to distribute the data in the children
+	// based on the pivots in the parents, so that each child starts on
+	// a pivot of the parents, and is approximately as big as a block.
+	return nil
 }
 
 // Read returns the data for k if it exists. Otherwise, it returns nil. It is
@@ -262,6 +429,9 @@ func (t *T) Read(key []byte) ([]byte, error) {
 // Delete removes the key from the skip list. It is not safe to modify the
 // key slice.
 func (t *T) Delete(key []byte) error {
+	// TODO(jeff): if some child has enough delete entries
+	// destined for it, we need to immediately flush.
+
 	panic("not implemented")
 }
 

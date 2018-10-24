@@ -2,7 +2,9 @@ package node
 
 import "fmt"
 
-const dumpLeaf = true
+const dumpLeaf = false
+
+func Dump(n *T) { dump(&n.entries, n.buf[n.base:]) }
 
 // dump constructs a dot graph of the btree
 func dump(b *btree, buf []byte) {

@@ -271,23 +271,30 @@ func (t *T) iter(cb func(ent *Entry, buf []byte) bool) error {
 // Flush iterates over all of the entries in the node. If the entry is returned
 // with a zero pivot, it is removed. Returns any error from the callback.
 func (t *T) Flush(cb func(ent *Entry, key, value []byte) error) error {
+	// TODO(jeff): ecopy escapes. maybe we change the callback to accept
+	// and return an entry value instead? we don't want to allow direct
+	// modification in case an error happens, so that no changes are
+	// made.
+
 	var (
-		bu   btreeBulk
-		nbuf []byte
-		base = t.buf[t.base:]
+		bu    btreeBulk
+		nbuf  []byte
+		base  = t.buf[t.base:]
+		ecopy Entry
+		err   error
 	)
 
-	var err error
 	t.entries.Iter(func(ent *Entry) bool {
-		if err = cb(ent, ent.readKey(base), ent.readValue(base)); err != nil {
+		ecopy = *ent
+		if err = cb(&ecopy, ent.readKey(base), ent.readValue(base)); err != nil {
 			return false
-		} else if ent.pivot == 0 {
+		} else if ecopy.pivot == 0 {
 			return true
 		}
 
-		nbuf = append(nbuf, ent.readEntry(base)...)
-		ent.offset = uint32(len(nbuf))
-		bu.append(*ent)
+		ecopy.offset = uint32(len(nbuf))
+		nbuf = append(nbuf, ecopy.readEntry(base)...)
+		bu.append(ecopy)
 		return true
 	})
 	if err != nil {
@@ -299,5 +306,15 @@ func (t *T) Flush(cb func(ent *Entry, key, value []byte) error) error {
 	t.base = 0
 	t.dirty = true
 
+	return nil
+}
+
+// Update iterates over all of the entries in the node. It stops early if
+// the callback returns false.
+func (t *T) Update(cb func(ent *Entry, key []byte) bool) error {
+	base := t.buf[t.base:]
+	t.entries.Iter(func(ent *Entry) bool {
+		return cb(ent, ent.readKey(base))
+	})
 	return nil
 }

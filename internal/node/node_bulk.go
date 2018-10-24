@@ -15,7 +15,7 @@ type Bulk struct {
 
 // Reset clears the state of the bulk import.
 func (b *Bulk) Reset() {
-	b.buf = b.buf[:0]
+	b.buf = nil
 	b.bu = btreeBulk{}
 }
 
@@ -45,7 +45,7 @@ var bulkAppendThunk mon.Thunk // timing info for bulk.Append
 // is true, it is added as a tombstone. It returns true if the
 // write happened, and false if it would cause the node to become
 // too large.
-func (b *Bulk) Append(key, value []byte, tombstone bool) bool {
+func (b *Bulk) Append(key, value []byte, tombstone bool, pivot uint32) bool {
 	timer := bulkAppendThunk.Start()
 
 	// make sure the write is ok to go
@@ -56,6 +56,7 @@ func (b *Bulk) Append(key, value []byte, tombstone bool) bool {
 
 	// build the entry that we will insert.
 	ent := newEntry(key, value, tombstone, uint32(len(b.buf)))
+	ent.SetPivot(pivot)
 
 	// add the data to the buffer
 	b.buf = append(b.buf, key...)
