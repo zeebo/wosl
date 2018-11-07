@@ -13,7 +13,8 @@ func TestBtreeBulk(t *testing.T) {
 		var buf []byte
 
 		for i := 0; i < 1000; i++ {
-			ent, _ := appendEntry(&buf, fmt.Sprintf("%04d", i), "")
+			var ent Entry
+			ent, buf = appendEntry(&buf, fmt.Sprintf("%04d", i), "")
 			bu.append(ent)
 		}
 
@@ -22,7 +23,7 @@ func TestBtreeBulk(t *testing.T) {
 		i := 0
 		bt.Iter(func(ent *Entry) bool {
 			key := string(ent.readKey(buf))
-			assert.Equal(t, key, fmt.Sprint(i))
+			assert.Equal(t, key, fmt.Sprintf("%04d", i))
 			i++
 			return true
 		})

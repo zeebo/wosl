@@ -33,5 +33,5 @@ func appendEntry(buf *[]byte, key, value string) (Entry, []byte) {
 	ent := newEntry([]byte(key), []byte(value), false, uint32(len(*buf)))
 	*buf = append(*buf, key...)
 	*buf = append(*buf, value...)
-	return ent, []byte(*buf)
+	return ent, *buf
 }

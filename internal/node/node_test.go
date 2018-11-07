@@ -18,9 +18,9 @@ func TestNode(t *testing.T) {
 			assert.That(t, n.Insert(buf, nil))
 		}
 
-		last := ""
-		n.iter(func(ent *Entry, buf []byte) bool {
-			key := string(ent.readKey(buf))
+		last, base := "", n.buf[n.base:]
+		n.entries.Iter(func(ent *Entry) bool {
+			key := string(ent.readKey(base))
 			assert.That(t, key > last)
 			last = key
 			return true
@@ -44,16 +44,18 @@ func TestNode(t *testing.T) {
 			assert.NoError(t, err)
 
 			var keys1, values1 []string
-			n1.iter(func(ent *Entry, buf []byte) bool {
-				keys1 = append(keys1, string(ent.readKey(buf)))
-				values1 = append(values1, string(ent.readValue(buf)))
+			base1 := n1.buf[n1.base:]
+			n1.entries.Iter(func(ent *Entry) bool {
+				keys1 = append(keys1, string(ent.readKey(base1)))
+				values1 = append(values1, string(ent.readValue(base1)))
 				return true
 			})
 
 			var keys2, values2 []string
-			n2.iter(func(ent *Entry, buf []byte) bool {
-				keys2 = append(keys2, string(ent.readKey(buf)))
-				values2 = append(values2, string(ent.readValue(buf)))
+			base2 := n2.buf[n2.base:]
+			n2.entries.Iter(func(ent *Entry) bool {
+				keys2 = append(keys2, string(ent.readKey(base2)))
+				values2 = append(values2, string(ent.readValue(base2)))
 				return true
 			})
 

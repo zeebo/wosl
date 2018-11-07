@@ -17,9 +17,9 @@ func TestNodeBulk(t *testing.T) {
 		}
 		n := bu.Done(0, 0)
 
-		last := ""
-		n.iter(func(ent *Entry, buf []byte) bool {
-			key := string(ent.readKey(buf))
+		last, base := "", n.buf[n.base:]
+		n.entries.Iter(func(ent *Entry) bool {
+			key := string(ent.readKey(base))
 			assert.That(t, key > last)
 			last = key
 			return true

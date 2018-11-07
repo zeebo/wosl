@@ -162,7 +162,7 @@ func (t *T) Write(buf []byte) ([]byte, error) {
 
 	// compact the entries so that their offsets are increasing
 	data := buf[nodeHeaderPadded+btreeSize : nodeHeaderPadded+btreeSize : len(buf)]
-	t.iter(func(ent *Entry, buf []byte) bool {
+	t.entries.Iter(func(ent *Entry) bool {
 		offset := uint32(len(data))
 		data = append(data, ent.readEntry(buf)...)
 		ent.offset = offset
@@ -255,66 +255,4 @@ func (t *T) Delete(key []byte) (wrote bool) {
 
 	timer.Stop()
 	return true
-}
-
-// iter is a helper to iterate over all of the entries with the appropriate buffer
-// for their offset. It is usually not used internally to avoid the double function
-// call overhead.
-func (t *T) iter(cb func(ent *Entry, buf []byte) bool) error {
-	base := t.buf[t.base:]
-	t.entries.Iter(func(ent *Entry) bool {
-		return cb(ent, base)
-	})
-	return nil
-}
-
-// Flush iterates over all of the entries in the node. If the entry is returned
-// with a zero pivot, it is removed. Returns any error from the callback.
-func (t *T) Flush(cb func(ent *Entry, key, value []byte) error) error {
-	// TODO(jeff): ecopy escapes. maybe we change the callback to accept
-	// and return an entry value instead? we don't want to allow direct
-	// modification in case an error happens, so that no changes are
-	// made.
-
-	var (
-		bu    btreeBulk
-		nbuf  []byte
-		base  = t.buf[t.base:]
-		ecopy Entry
-		err   error
-	)
-
-	t.entries.Iter(func(ent *Entry) bool {
-		ecopy = *ent
-		if err = cb(&ecopy, ent.readKey(base), ent.readValue(base)); err != nil {
-			return false
-		} else if ecopy.pivot == 0 {
-			return true
-		}
-
-		ecopy.offset = uint32(len(nbuf))
-		nbuf = append(nbuf, ecopy.readEntry(base)...)
-		bu.append(ecopy)
-		return true
-	})
-	if err != nil {
-		return Error.Wrap(err)
-	}
-
-	t.buf = nbuf
-	t.entries = bu.done()
-	t.base = 0
-	t.dirty = true
-
-	return nil
-}
-
-// Update iterates over all of the entries in the node. It stops early if
-// the callback returns false.
-func (t *T) Update(cb func(ent *Entry, key []byte) bool) error {
-	base := t.buf[t.base:]
-	t.entries.Iter(func(ent *Entry) bool {
-		return cb(ent, ent.readKey(base))
-	})
-	return nil
 }
