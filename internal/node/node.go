@@ -15,7 +15,7 @@ const nodeHeaderSize = (0 +
 	4 + // next
 	4 + // height
 	4 + // pivot
-	8 + // size
+	8 + // btree size
 	0)
 
 // how many bytes a node header is when padded
