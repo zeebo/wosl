@@ -4,6 +4,7 @@ import (
 	"math/bits"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 )
 
 const (
@@ -14,19 +15,32 @@ const (
 	histEntries     = 1 << histEntriesBits
 )
 
+// histBucket is the type of a histogram bucket.
+type histBucket [histEntries]int64
+
+// loadBucket atomically loads the bucket pointer from the address.
+func loadBucket(addr **histBucket) *histBucket {
+	return (*histBucket)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(addr))))
+}
+
+// storeBucket atomically stores the bucket pointer into the address.
+func storeBucket(addr **histBucket, val *histBucket) {
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(addr)), unsafe.Pointer(val))
+}
+
 // lowerValue returns the smallest value that can be stored at the entry.
-func lowerValue(bucket, entry uint) int64 {
+func lowerValue(bucket uint, entry int) int64 {
 	return (1<<bucket-1)<<histEntriesBits + int64(entry<<bucket)
 }
 
 // middleValue returns the value between the smallest and largest that can be
 // stored at the entry.
-func middleValue(bucket, entry uint) int64 {
+func middleValue(bucket uint, entry int) int64 {
 	return (1<<bucket-1)<<histEntriesBits + int64(entry<<bucket) + (1 << bucket / 2)
 }
 
 // upperValue returns the largest value that can be stored at the entry.
-func upperValue(bucket, entry uint) int64 {
+func upperValue(bucket uint, entry int) int64 {
 	return (1<<bucket-1)<<histEntriesBits + int64(entry<<bucket) + (1 << bucket)
 }
 
@@ -36,7 +50,7 @@ type Histogram struct {
 	current int64
 	total   int64
 	mu      sync.Mutex // protects lazy allocation of buckets
-	counts  [histBuckets]atomic.Value
+	counts  [histBuckets]*histBucket
 }
 
 // start informs the Histogram that a task is starting.
@@ -52,7 +66,7 @@ func (h *Histogram) done(v int64) {
 	entry := uint64(v>>bucket) - histEntries
 
 	if bucket < histBuckets && entry < histEntries {
-		b, _ := h.counts[bucket].Load().(*[histEntries]int64)
+		b := loadBucket(&h.counts[bucket])
 		if b == nil {
 			b = h.makeBucket(bucket)
 		}
@@ -62,12 +76,12 @@ func (h *Histogram) done(v int64) {
 }
 
 // makeBucket ensures the bucket exists and returns it.
-func (h *Histogram) makeBucket(bucket uint64) *[histEntries]int64 {
+func (h *Histogram) makeBucket(bucket uint64) *histBucket {
 	h.mu.Lock()
-	b, _ := h.counts[bucket].Load().(*[histEntries]int64)
+	b := loadBucket(&h.counts[bucket])
 	if b == nil {
-		b = new([histEntries]int64)
-		h.counts[bucket].Store(b)
+		b = new(histBucket)
+		storeBucket(&h.counts[bucket], b)
 	}
 	h.mu.Unlock()
 	return b
@@ -90,7 +104,7 @@ func (h *Histogram) Quantile(q float64) int64 {
 	target, acc := int64(q*float64(h.Total())+0.5), int64(0)
 
 	for bucket := range h.counts[:] {
-		b, _ := h.counts[bucket].Load().(*[histEntries]int64)
+		b := loadBucket(&h.counts[bucket])
 		if b == nil {
 			continue
 		}
@@ -98,7 +112,7 @@ func (h *Histogram) Quantile(q float64) int64 {
 		for entry := range b {
 			acc += atomic.LoadInt64(&b[entry])
 			if acc >= target {
-				return lowerValue(uint(bucket), uint(entry))
+				return lowerValue(uint(bucket), entry)
 			}
 		}
 	}
@@ -118,14 +132,14 @@ func (h *Histogram) Average() float64 {
 	stotal, acc := float64(h.Total()), int64(0)
 
 	for bucket := range h.counts[:] {
-		b, _ := h.counts[bucket].Load().(*[histEntries]int64)
+		b := loadBucket(&h.counts[bucket])
 		if b == nil {
 			continue
 		}
 
 		for entry := range b {
 			if count := atomic.LoadInt64(&b[entry]); count > 0 {
-				acc += count * middleValue(uint(bucket), uint(entry))
+				acc += count * middleValue(uint(bucket), entry)
 			}
 		}
 	}
@@ -139,14 +153,14 @@ func (h *Histogram) Variance() (float64, float64) {
 	stotal, avg, acc := float64(h.Total()), h.Average(), 0.0
 
 	for bucket := range h.counts[:] {
-		b, _ := h.counts[bucket].Load().(*[histEntries]int64)
+		b := loadBucket(&h.counts[bucket])
 		if b == nil {
 			continue
 		}
 
 		for entry := range b {
 			if count := atomic.LoadInt64(&b[entry]); count > 0 {
-				dev := float64(middleValue(uint(bucket), uint(entry))) - avg
+				dev := float64(middleValue(uint(bucket), entry)) - avg
 				acc += dev * dev * float64(count)
 			}
 		}
