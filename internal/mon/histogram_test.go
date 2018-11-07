@@ -70,6 +70,7 @@ func BenchmarkHistogram(b *testing.B) {
 			his.done(int64(rng.Uint32()<<28 | rng.Uint32()))
 		}
 		assert.Equal(b, his.Total(), 1000000)
+		b.ReportAllocs()
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
@@ -85,6 +86,7 @@ func BenchmarkHistogram(b *testing.B) {
 			his.done(int64(rng.Intn(64)))
 		}
 		assert.Equal(b, his.Total(), 1000)
+		b.ReportAllocs()
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
@@ -100,10 +102,11 @@ func BenchmarkHistogram(b *testing.B) {
 			his.done(int64(rng.Intn(64)))
 		}
 		assert.Equal(b, his.Total(), 1000)
+		b.ReportAllocs()
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_ = his.Variance()
+			_, _ = his.Variance()
 		}
 	})
 
