@@ -5,9 +5,10 @@ import (
 	"testing"
 
 	"github.com/zeebo/wosl/internal/assert"
+	"github.com/zeebo/wosl/internal/node/entry"
 )
 
-func TestNodeBulk(t *testing.T) {
+func TestBulk(t *testing.T) {
 	t.Run("Append", func(t *testing.T) {
 		var bu Bulk
 
@@ -18,8 +19,8 @@ func TestNodeBulk(t *testing.T) {
 		n := bu.Done(0, 0)
 
 		last, base := "", n.buf[n.base:]
-		n.entries.Iter(func(ent *Entry) bool {
-			key := string(ent.readKey(base))
+		n.entries.Iter(func(ent *entry.T) bool {
+			key := string(ent.ReadKey(base))
 			assert.That(t, key > last)
 			last = key
 			return true
@@ -27,7 +28,7 @@ func TestNodeBulk(t *testing.T) {
 	})
 }
 
-func BenchmarkNodeBulk(b *testing.B) {
+func BenchmarkBulk(b *testing.B) {
 	b.Run("Append", func(b *testing.B) {
 		run := func(b *testing.B, v []byte) {
 			keys := make([][]byte, b.N)

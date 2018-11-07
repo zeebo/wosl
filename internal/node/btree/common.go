@@ -1,4 +1,4 @@
-package node
+package btree
 
 // compare is like bytes.Compare but for uint32s.
 func compare(a, b uint32) int {

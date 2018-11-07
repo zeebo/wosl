@@ -1,4 +1,4 @@
-package node
+package entry
 
 import (
 	"testing"
@@ -8,11 +8,11 @@ import (
 
 func TestEntry(t *testing.T) {
 	t.Run("Basic", func(t *testing.T) {
-		ent := newEntry(make([]byte, 1), make([]byte, 2), true, 4)
+		ent := New(make([]byte, 1), make([]byte, 2), true, 4)
 		assert.Equal(t, ent.Pivot(), 0)
-		assert.Equal(t, ent.key(), 1)
-		assert.Equal(t, ent.value(), 2)
+		assert.Equal(t, ent.Key(), 1)
+		assert.Equal(t, ent.Value(), 2)
 		assert.Equal(t, ent.Tombstone(), true)
-		assert.Equal(t, ent.offset, 4)
+		assert.Equal(t, ent.Offset(), 4)
 	})
 }

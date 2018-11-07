@@ -1,27 +1,25 @@
-package node
+package btree
 
 import "fmt"
 
 const dumpLeaf = false
 
-func Dump(n *T) { dump(&n.entries, n.buf[n.base:]) }
-
 // dump constructs a dot graph of the btree
-func dump(b *btree, buf []byte) {
+func dump(b *T, buf []byte) {
 	var order []uint32
-	var twalk func(*btreeNode, uint32)
-	twalk = func(n *btreeNode, nid uint32) {
+	var twalk func(*node, uint32)
+	twalk = func(n *node, nid uint32) {
 		if n.leaf {
 			return
 		}
 		for i := uint16(0); i < n.count; i++ {
-			order = append(order, n.payload[i].pivot)
+			order = append(order, n.payload[i].Pivot())
 		}
 		if n.next != invalidNode {
 			order = append(order, n.next)
 		}
 		for i := uint16(0); i < n.count; i++ {
-			cid := n.payload[i].pivot
+			cid := n.payload[i].Pivot()
 			twalk(b.nodes[cid], cid)
 		}
 	}
@@ -34,9 +32,9 @@ func dump(b *btree, buf []byte) {
 		fmt.Printf(`<TD PORT="fb"> </TD><TD PORT="fn">n%d (%d)</TD>`, nid, n.count)
 		if !n.leaf || dumpLeaf {
 			for i := uint16(0); i < n.count; i++ {
-				fmt.Printf(`<TD PORT="f%d">%s`, i, n.payload[i].readKey(buf))
+				fmt.Printf(`<TD PORT="f%d">%s`, i, n.payload[i].ReadKey(buf))
 				if n.leaf {
-					fmt.Printf(`:%d`, n.payload[i].value())
+					fmt.Printf(`:%d`, n.payload[i].Value())
 				}
 				fmt.Printf(`</TD>`)
 			}
@@ -45,7 +43,7 @@ func dump(b *btree, buf []byte) {
 
 		if !n.leaf {
 			for i := uint16(0); i < n.count; i++ {
-				fmt.Printf("node%d:f%d:s -> node%d:fn:n;\n", nid, i, n.payload[i].pivot)
+				fmt.Printf("node%d:f%d:s -> node%d:fn:n;\n", nid, i, n.payload[i].Pivot())
 			}
 		}
 
@@ -83,14 +81,14 @@ func dump(b *btree, buf []byte) {
 		output(uint32(nid))
 	}
 
-	var walk func(*btreeNode)
-	walk = func(n *btreeNode) {
+	var walk func(*node)
+	walk = func(n *node) {
 		if n.leaf {
 			return
 		}
 		fmt.Printf("{rank=same ")
 		for i := uint16(0); i < n.count; i++ {
-			fmt.Printf("node%d ", n.payload[i].pivot)
+			fmt.Printf("node%d ", n.payload[i].Pivot())
 		}
 		if n.next != invalidNode {
 			fmt.Printf("node%d", n.next)
@@ -98,7 +96,7 @@ func dump(b *btree, buf []byte) {
 		fmt.Println("}")
 
 		for i := uint16(0); i < n.count; i++ {
-			walk(b.nodes[n.payload[i].pivot])
+			walk(b.nodes[n.payload[i].Pivot()])
 		}
 		if n.next != invalidNode {
 			walk(b.nodes[n.next])

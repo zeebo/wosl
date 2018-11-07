@@ -1,28 +1,29 @@
-package node
+package btree
 
 import (
 	"fmt"
 	"testing"
 
 	"github.com/zeebo/wosl/internal/assert"
+	"github.com/zeebo/wosl/internal/node/entry"
 )
 
-func TestBtreeBulk(t *testing.T) {
+func TestBulk(t *testing.T) {
 	t.Run("Basic", func(t *testing.T) {
-		var bu btreeBulk
+		var bu Bulk
 		var buf []byte
 
 		for i := 0; i < 1000; i++ {
-			var ent Entry
+			var ent entry.T
 			ent, buf = appendEntry(&buf, fmt.Sprintf("%04d", i), "")
-			bu.append(ent)
+			bu.Append(ent)
 		}
 
-		bt := bu.done()
+		bt := bu.Done()
 
 		i := 0
-		bt.Iter(func(ent *Entry) bool {
-			key := string(ent.readKey(buf))
+		bt.Iter(func(ent *entry.T) bool {
+			key := string(ent.ReadKey(buf))
 			assert.Equal(t, key, fmt.Sprintf("%04d", i))
 			i++
 			return true
@@ -30,36 +31,36 @@ func TestBtreeBulk(t *testing.T) {
 	})
 
 	t.Run("One", func(t *testing.T) {
-		var bu btreeBulk
+		var bu Bulk
 		var buf []byte
 
 		ent, _ := appendEntry(&buf, "0", "")
-		bu.append(ent)
-		bt := bu.done()
+		bu.Append(ent)
+		bt := bu.Done()
 
-		bt.Iter(func(ent *Entry) bool {
-			assert.Equal(t, string(ent.readKey(buf)), "0")
+		bt.Iter(func(ent *entry.T) bool {
+			assert.Equal(t, string(ent.ReadKey(buf)), "0")
 			return true
 		})
 	})
 
 	t.Run("Zero", func(t *testing.T) {
-		var bu btreeBulk
-		bt := bu.done()
+		var bu Bulk
+		bt := bu.Done()
 
-		bt.Iter(func(ent *Entry) bool {
+		bt.Iter(func(ent *entry.T) bool {
 			t.Fatal("expected no entries")
 			return true
 		})
 	})
 }
 
-func BenchmarkBtreeBulk(b *testing.B) {
+func BenchmarkBulk(b *testing.B) {
 	b.Run("Basic", func(b *testing.B) {
 		run := func(b *testing.B, n int) {
 			var buf []byte
 
-			ents := make([]Entry, n)
+			ents := make([]entry.T, n)
 			for i := range ents {
 				ents[i], _ = appendEntry(&buf, fmt.Sprintf("%08d", i), "")
 			}
@@ -69,9 +70,9 @@ func BenchmarkBtreeBulk(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				var bu btreeBulk
+				var bu Bulk
 				for i := range ents {
-					bu.append(ents[i])
+					bu.Append(ents[i])
 				}
 			}
 		}

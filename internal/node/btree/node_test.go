@@ -1,4 +1,4 @@
-package node
+package btree
 
 import (
 	"fmt"
@@ -8,12 +8,12 @@ import (
 	"github.com/zeebo/wosl/internal/assert"
 )
 
-func TestBtreeNode(t *testing.T) {
+func TestNode(t *testing.T) {
 	t.Run("Basic", func(t *testing.T) {
 		var keys []string
 		var seen = map[string]bool{}
 		var buf []byte
-		var n btreeNode
+		var n node
 
 		for i := 0; i < payloadEntries-1; i++ {
 			var key string
@@ -22,7 +22,7 @@ func TestBtreeNode(t *testing.T) {
 			}
 
 			ent, bu := appendEntry(&buf, key, "")
-			n.insertEntry(ent.readKey(buf), ent, bu)
+			n.insertEntry(ent.ReadKey(buf), ent, bu)
 
 			keys = append(keys, key)
 			seen[key] = true
@@ -31,7 +31,7 @@ func TestBtreeNode(t *testing.T) {
 		sort.Strings(keys)
 
 		for i := uint16(0); i < n.count; i++ {
-			assert.Equal(t, string(n.payload[i].readKey(buf)), keys[i])
+			assert.Equal(t, string(n.payload[i].ReadKey(buf)), keys[i])
 		}
 	})
 }

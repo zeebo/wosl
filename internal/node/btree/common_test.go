@@ -1,9 +1,10 @@
-package node
+package btree
 
 import (
 	"fmt"
 	"time"
 
+	"github.com/zeebo/wosl/internal/node/entry"
 	"github.com/zeebo/wosl/internal/pcg"
 )
 
@@ -27,4 +28,11 @@ func init() {
 			numbers[i] = []byte(fmt.Sprint(gen.Intn(numbersSize)))
 		}
 	}
+}
+
+func appendEntry(buf *[]byte, key, value string) (entry.T, []byte) {
+	ent := entry.New([]byte(key), []byte(value), false, uint32(len(*buf)))
+	*buf = append(*buf, key...)
+	*buf = append(*buf, value...)
+	return ent, *buf
 }

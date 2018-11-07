@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/zeebo/wosl/internal/assert"
+	"github.com/zeebo/wosl/internal/node/entry"
 )
 
 const bufferSize = 1 << 20
@@ -19,8 +20,8 @@ func TestNode(t *testing.T) {
 		}
 
 		last, base := "", n.buf[n.base:]
-		n.entries.Iter(func(ent *Entry) bool {
-			key := string(ent.readKey(base))
+		n.entries.Iter(func(ent *entry.T) bool {
+			key := string(ent.ReadKey(base))
 			assert.That(t, key > last)
 			last = key
 			return true
@@ -45,17 +46,17 @@ func TestNode(t *testing.T) {
 
 			var keys1, values1 []string
 			base1 := n1.buf[n1.base:]
-			n1.entries.Iter(func(ent *Entry) bool {
-				keys1 = append(keys1, string(ent.readKey(base1)))
-				values1 = append(values1, string(ent.readValue(base1)))
+			n1.entries.Iter(func(ent *entry.T) bool {
+				keys1 = append(keys1, string(ent.ReadKey(base1)))
+				values1 = append(values1, string(ent.ReadValue(base1)))
 				return true
 			})
 
 			var keys2, values2 []string
 			base2 := n2.buf[n2.base:]
-			n2.entries.Iter(func(ent *Entry) bool {
-				keys2 = append(keys2, string(ent.readKey(base2)))
-				values2 = append(values2, string(ent.readValue(base2)))
+			n2.entries.Iter(func(ent *entry.T) bool {
+				keys2 = append(keys2, string(ent.ReadKey(base2)))
+				values2 = append(values2, string(ent.ReadValue(base2)))
 				return true
 			})
 

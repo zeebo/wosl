@@ -6,6 +6,8 @@ import (
 
 	"github.com/zeebo/errs"
 	"github.com/zeebo/wosl/internal/mon"
+	"github.com/zeebo/wosl/internal/node/btree"
+	"github.com/zeebo/wosl/internal/node/entry"
 )
 
 // Error is the class that contains all the errors from this package.
@@ -19,7 +21,7 @@ const nodeHeaderSize = (0 +
 	0)
 
 // how many bytes a node header is when padded
-const nodeHeaderPadded = btreeNodeSize - btreeHeaderSize
+const nodeHeaderPadded = btree.NodeSize - btree.HeaderSize
 
 // TODO(jeff): investigate using a [][]byte (or just two []byte) so that we
 // don't have to copy potentially large amounts of data to just append a new
@@ -30,13 +32,13 @@ const nodeHeaderPadded = btreeNodeSize - btreeHeaderSize
 // T is a node in a write-optimized skip list. It targets a specific size
 // and maintains entry pointers into the buf.
 type T struct {
-	next    uint32 // pointer to the next node (or 0)
-	height  uint32 // height of the node
-	pivot   uint32 // pivot for special root node
-	buf     []byte // buffer containing the keys and values
-	base    uint32 // how many bytes into buf the key/values start
-	entries btree  // btree of entries into buf
-	dirty   bool   // if modifications have happened since the last Write
+	next    uint32  // pointer to the next node (or 0)
+	height  uint32  // height of the node
+	pivot   uint32  // pivot for special root node
+	buf     []byte  // buffer containing the keys and values
+	base    uint32  // how many bytes into buf the key/values start
+	entries btree.T // btree of entries into buf
+	dirty   bool    // if modifications have happened since the last Write
 }
 
 // New returns a node with a buffer size of the given size.
@@ -71,7 +73,8 @@ func Load(buf []byte) (*T, error) {
 		return nil, Error.New("buffer too small: %d", len(buf))
 	}
 
-	entries, err := loadBtree(buf[nodeHeaderPadded:])
+	// read in the btree
+	entries, err := btree.Load(buf[nodeHeaderPadded:])
 	if err != nil {
 		timer.Stop()
 		return nil, Error.Wrap(err)
@@ -104,7 +107,7 @@ func (t *T) Length() uint64 {
 }
 
 // Count returns how many entries are in the node.
-func (t *T) Count() uint32 { return uint32(t.entries.entries) }
+func (t *T) Count() uint32 { return t.entries.Count() }
 
 // Height returns the height of the node.
 func (t *T) Height() uint32 { return t.height }
@@ -162,15 +165,15 @@ func (t *T) Write(buf []byte) ([]byte, error) {
 
 	// compact the entries so that their offsets are increasing
 	data := buf[nodeHeaderPadded+btreeSize : nodeHeaderPadded+btreeSize : len(buf)]
-	t.entries.Iter(func(ent *Entry) bool {
+	t.entries.Iter(func(ent *entry.T) bool {
 		offset := uint32(len(data))
-		data = append(data, ent.readEntry(buf)...)
-		ent.offset = offset
+		data = append(data, ent.ReadEntry(buf)...)
+		ent.SetOffset(offset)
 		return true
 	})
 
 	// write in the compacted btree
-	t.entries.write(buf[nodeHeaderPadded:])
+	t.entries.Write(buf[nodeHeaderPadded:])
 
 	// update our local state because we modified the btree entries
 	t.buf = buf
@@ -186,18 +189,18 @@ func (t *T) Write(buf []byte) ([]byte, error) {
 func (t *T) Reset() {
 	t.buf = t.buf[:0]
 	t.base = 0
-	t.entries.reset()
+	t.entries.Reset()
 	t.dirty = false
 }
 
 // Fits returns if a write for the given key would fit in size.
 func (t *T) Fits(key, value []byte, size uint32) bool {
-	return len(key) <= keyMask &&
-		len(value) <= valueMask &&
+	return len(key) <= entry.KeyMask &&
+		len(value) <= entry.ValueMask &&
 		// we add 10 btreeNodeSize to protect if the insert would cause a split
 		// which might allocate up to log(n) nodes. there's no way that's ever
 		// bigger than 10 (famous last words).
-		t.Length()+10*btreeNodeSize < uint64(size)
+		t.Length()+10*btree.NodeSize < uint64(size)
 }
 
 var nodeInsertThunk mon.Thunk // timing info for node.Insert
@@ -215,7 +218,7 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 	}
 
 	// build the entry that we will insert.
-	ent := newEntry(key, value, false, uint32(len(t.buf))-t.base)
+	ent := entry.New(key, value, false, uint32(len(t.buf))-t.base)
 
 	// add the data to the buffer
 	t.buf = append(t.buf, key...)
@@ -244,7 +247,7 @@ func (t *T) Delete(key []byte) (wrote bool) {
 	}
 
 	// build the entry that we will insert.
-	ent := newEntry(key, nil, true, uint32(len(t.buf))-t.base)
+	ent := entry.New(key, nil, true, uint32(len(t.buf))-t.base)
 
 	// add the data to the buffer
 	t.buf = append(t.buf, key...)
