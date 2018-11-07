@@ -49,6 +49,12 @@ func (p *T) Intn(n int) int {
 	return fastMod(p.Uint32(), n)
 }
 
+// Float64 returns a float uniformly in [0, 1)
+func (p *T) Float64() float64 {
+	u53 := uint64(p.Uint32()<<21) | uint64(p.Uint32()>>11)
+	return float64(u53) / (1 << 53)
+}
+
 // fastMod computes n % m assuming that n is a random number in the full
 // uint32 range.
 func fastMod(n uint32, m int) int {

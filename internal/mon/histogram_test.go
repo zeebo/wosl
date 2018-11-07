@@ -1,54 +1,54 @@
 package mon
 
 import (
-	"sync"
 	"testing"
+	"time"
 
 	"github.com/zeebo/wosl/internal/assert"
+	"github.com/zeebo/wosl/internal/pcg"
 )
 
 func TestHistogram(t *testing.T) {
-	t.Run("Basic", func(t *testing.T) {
-		his := new(Histogram)
-		assert.Equal(t, his.Total(), 0)
-		assert.Equal(t, his.Current(), 0)
-		assert.DeepEqual(t, his.Durations(), []int64{})
+	t.Run("Largest", func(t *testing.T) {
+		h := new(Histogram)
 
-		his.start()
-		assert.Equal(t, his.Total(), 0)
-		assert.Equal(t, his.Current(), 1)
-		assert.DeepEqual(t, his.Durations(), []int64{})
+		h.start()
+		h.done(int64(time.Hour))
+		assert.Equal(t, h.Total(), 1)
 
-		his.done(1)
-		assert.Equal(t, his.Total(), 1)
-		assert.Equal(t, his.Current(), 0)
-		assert.DeepEqual(t, his.Durations(), []int64{1})
+		h.start()
+		h.done(int64(2 * time.Hour))
+		assert.Equal(t, h.Total(), 1)
 	})
 
-	t.Run("Race", func(t *testing.T) {
-		wg := new(sync.WaitGroup)
-		his := new(Histogram)
+	t.Run("Basic", func(t *testing.T) {
+		h := new(Histogram)
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		for i := int64(0); i < 1000; i++ {
+			h.start()
+			h.done(i)
+		}
+	})
 
-			for i := 0; i < 1e6; i++ {
-				his.start()
-				his.done(1)
-			}
-		}()
+	t.Run("Quantile", func(t *testing.T) {
+		h := new(Histogram)
+		for i := int64(0); i < 1000; i++ {
+			h.done(i)
+		}
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		assert.Equal(t, h.Quantile(0), 0)
+		assert.Equal(t, h.Quantile(.25), 248)
+		assert.Equal(t, h.Quantile(.5), 496)
+		assert.Equal(t, h.Quantile(1), 992)
+	})
 
-			for i := 0; i < 1e6; i++ {
-				his.Durations()
-			}
-		}()
+	t.Run("Average", func(t *testing.T) {
+		h := new(Histogram)
+		for i := int64(0); i < 1000; i++ {
+			h.done(i)
+		}
 
-		wg.Wait()
+		assert.Equal(t, h.Average(), float64(500))
 	})
 }
 
@@ -61,4 +61,50 @@ func BenchmarkHistogram(b *testing.B) {
 			his.done(1)
 		}
 	})
+
+	b.Run("Quantile", func(b *testing.B) {
+		his := new(Histogram)
+		rng := pcg.New(1, 1)
+		for i := 0; i < 1000000; i++ {
+			his.start()
+			his.done(int64(rng.Uint32()<<28 | rng.Uint32()))
+		}
+		assert.Equal(b, his.Total(), 1000000)
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			his.Quantile(rng.Float64())
+		}
+	})
+
+	b.Run("Average", func(b *testing.B) {
+		his := new(Histogram)
+		rng := pcg.New(1, 1)
+		for i := 0; i < 1000; i++ {
+			his.start()
+			his.done(int64(rng.Intn(64)))
+		}
+		assert.Equal(b, his.Total(), 1000)
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			_ = his.Average()
+		}
+	})
+
+	b.Run("Variance", func(b *testing.B) {
+		his := new(Histogram)
+		rng := pcg.New(1, 1)
+		for i := 0; i < 1000; i++ {
+			his.start()
+			his.done(int64(rng.Intn(64)))
+		}
+		assert.Equal(b, his.Total(), 1000)
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			_ = his.Variance()
+		}
+	})
+
 }

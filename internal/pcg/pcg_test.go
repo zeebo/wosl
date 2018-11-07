@@ -7,10 +7,10 @@ import (
 )
 
 func TestPCG(t *testing.T) {
-	pi := New(2345, 2378)
+	rng := New(2345, 2378)
 	out := make([]uint32, 10)
 	for i := range out {
-		out[i] = pi.Uint32()
+		out[i] = rng.Uint32()
 	}
 
 	// this is for a right rotate
@@ -42,12 +42,23 @@ func TestPCG(t *testing.T) {
 	})
 }
 
-var blackholeUint32 uint32
+var (
+	blackholeUint32  uint32
+	blackholeFloat64 float64
+)
 
 func BenchmarkPCG(b *testing.B) {
-	pi := New(2345, 2378)
+	b.Run("Uint32", func(b *testing.B) {
+		rng := New(2345, 2378)
+		for i := 0; i < b.N; i++ {
+			blackholeUint32 += rng.Uint32()
+		}
+	})
 
-	for i := 0; i < b.N; i++ {
-		blackholeUint32 += pi.Uint32()
-	}
+	b.Run("Float64", func(b *testing.B) {
+		rng := New(2345, 2378)
+		for i := 0; i < b.N; i++ {
+			blackholeFloat64 += rng.Float64()
+		}
+	})
 }

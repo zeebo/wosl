@@ -1,6 +1,6 @@
-/analysis.log
+analysis.log
 /.vscode
-/*.pprof
-/*.test
+*.pprof
+*.test
 graph.svg
 /*.txt
