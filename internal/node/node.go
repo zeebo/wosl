@@ -42,11 +42,8 @@ type T struct {
 }
 
 // New returns a node with a buffer size of the given size.
-func New(next, height uint32) *T {
-	return &T{
-		next:   next,
-		height: height,
-	}
+func New(height uint32) *T {
+	return &T{height: height}
 }
 
 var nodeLoadThunk mon.Thunk // timing info for node.Load
@@ -258,4 +255,12 @@ func (t *T) Delete(key []byte) (wrote bool) {
 
 	timer.Stop()
 	return true
+}
+
+// Iterator returns an iterator over the entries in the node.
+func (t *T) Iterator() Iterator {
+	return Iterator{
+		buf:  t.buf[t.base:],
+		iter: t.entries.Iterator(),
+	}
 }

@@ -259,6 +259,28 @@ func (b *T) Iter(cb func(ent *entry.T) bool) {
 	}
 }
 
+func (b *T) Iterator() Iterator {
+	// find the deepest leftmost node
+	n := b.root
+	if n == nil {
+		return Iterator{}
+	}
+
+	for !n.leaf {
+		nid := n.payload[0].Pivot()
+		if n.count == 0 {
+			nid = n.next
+		}
+		n = b.nodes[nid]
+	}
+
+	return Iterator{
+		b: b,
+		n: n,
+		i: uint16(1<<16 - 1), // overflow hack. this is -1
+	}
+}
+
 // HeaderSize is the number of bytes the btree header takes up
 const HeaderSize = 0 +
 	4 + // root id

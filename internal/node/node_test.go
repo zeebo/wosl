@@ -12,7 +12,7 @@ const bufferSize = 1 << 20
 
 func TestNode(t *testing.T) {
 	t.Run("Insert", func(t *testing.T) {
-		n := New(0, 0)
+		n := New(0)
 
 		for i := 0; i < 100; i++ {
 			buf := []byte(fmt.Sprint(gen.Intn(100)))
@@ -30,7 +30,7 @@ func TestNode(t *testing.T) {
 
 	t.Run("Write+Load", func(t *testing.T) {
 		run := func(t *testing.T, count uint64) {
-			n1 := New(0, 0)
+			n1 := New(0)
 			for n := uint64(0); count == 0 || n < count; n++ {
 				d := numbers[gen.Intn(numbersSize)&numbersMask]
 				n1.Insert(d, d)
@@ -77,7 +77,7 @@ func TestNode(t *testing.T) {
 func BenchmarkNode(b *testing.B) {
 	b.Run("Insert", func(b *testing.B) {
 		run := func(b *testing.B, v []byte) {
-			n := New(0, 0)
+			n := New(0)
 
 			b.SetBytes(numbersLength + int64(len(v)))
 			b.ReportAllocs()
@@ -99,7 +99,7 @@ func BenchmarkNode(b *testing.B) {
 
 	b.Run("Write", func(b *testing.B) {
 		run := func(b *testing.B, v []byte) {
-			n := New(0, 0)
+			n := New(0)
 			for {
 				n.Insert(numbers[gen.Intn(numbersSize)&numbersMask], v)
 				if n.Length() > bufferSize {
@@ -126,7 +126,7 @@ func BenchmarkNode(b *testing.B) {
 
 	b.Run("Load", func(b *testing.B) {
 		run := func(b *testing.B, v []byte) {
-			n := New(0, 0)
+			n := New(0)
 			for {
 				n.Insert(numbers[gen.Intn(numbersSize)&numbersMask], v)
 				if n.Length() > bufferSize {

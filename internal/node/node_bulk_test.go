@@ -16,7 +16,7 @@ func TestBulk(t *testing.T) {
 			key := []byte(fmt.Sprintf("%04d", i))
 			assert.That(t, bu.Append(key, nil, false, 0))
 		}
-		n := bu.Done(0, 0)
+		n := bu.Done(0)
 
 		last, base := "", n.buf[n.base:]
 		n.entries.Iter(func(ent *entry.T) bool {

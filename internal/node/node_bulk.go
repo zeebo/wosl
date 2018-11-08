@@ -73,8 +73,8 @@ func (b *Bulk) Append(key, value []byte, tombstone bool, pivot uint32) bool {
 
 // Done returns a node with the given next and height using the
 // bulk loaded data. It should not be called multiple times.
-func (b *Bulk) Done(next, height uint32) *T {
-	t := New(next, height)
+func (b *Bulk) Done(height uint32) *T {
+	t := New(height)
 	t.buf = b.buf
 	t.entries = b.bu.Done()
 	t.dirty = t.entries.Count() > 0
