@@ -10,10 +10,6 @@ type Cache interface {
 	// Disk returns the backing disk of the cache.
 	Disk() Disk
 
-	// Flush writes back all of the dirty nodes that are leased
-	// or remaining in the cache.
-	Flush() error
-
 	// Get retreives the node at the given block. It will return
 	// an error if there is no node for that block.
 	Get(block uint32) (lease.T, error)

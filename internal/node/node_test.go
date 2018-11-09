@@ -16,7 +16,7 @@ func TestNode(t *testing.T) {
 
 		for i := 0; i < 100; i++ {
 			buf := []byte(fmt.Sprint(gen.Intn(100)))
-			assert.That(t, n.Insert(buf, nil))
+			assert.That(t, n.Insert(buf, nil, 0))
 		}
 
 		last, base := "", n.buf[n.base:]
@@ -33,7 +33,7 @@ func TestNode(t *testing.T) {
 			n1 := New(0)
 			for n := uint64(0); count == 0 || n < count; n++ {
 				d := numbers[gen.Intn(numbersSize)&numbersMask]
-				n1.Insert(d, d)
+				n1.Insert(d, d, 0)
 				if n1.Length() > bufferSize {
 					break
 				}
@@ -84,7 +84,7 @@ func BenchmarkNode(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				n.Insert(numbers[i&numbersMask], v)
+				n.Insert(numbers[i&numbersMask], v, 0)
 				if n.Length() > bufferSize {
 					n.Reset()
 				}
@@ -101,7 +101,7 @@ func BenchmarkNode(b *testing.B) {
 		run := func(b *testing.B, v []byte) {
 			n := New(0)
 			for {
-				n.Insert(numbers[gen.Intn(numbersSize)&numbersMask], v)
+				n.Insert(numbers[gen.Intn(numbersSize)&numbersMask], v, 0)
 				if n.Length() > bufferSize {
 					break
 				}
@@ -128,7 +128,7 @@ func BenchmarkNode(b *testing.B) {
 		run := func(b *testing.B, v []byte) {
 			n := New(0)
 			for {
-				n.Insert(numbers[gen.Intn(numbersSize)&numbersMask], v)
+				n.Insert(numbers[gen.Intn(numbersSize)&numbersMask], v, 0)
 				if n.Length() > bufferSize {
 					break
 				}

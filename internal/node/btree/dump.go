@@ -2,10 +2,10 @@ package btree
 
 import "fmt"
 
-const dumpLeaf = false
+var DumpLeaf = false
 
-// dump constructs a dot graph of the btree
-func dump(b *T, buf []byte) {
+// Dump constructs a dot graph of the btree
+func Dump(b *T, buf []byte) {
 	var order []uint32
 	var twalk func(*node, uint32)
 	twalk = func(n *node, nid uint32) {
@@ -30,7 +30,7 @@ func dump(b *T, buf []byte) {
 		n := b.nodes[nid]
 		fmt.Printf(`node%d [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0"><TR>`, nid)
 		fmt.Printf(`<TD PORT="fb"> </TD><TD PORT="fn">n%d (%d)</TD>`, nid, n.count)
-		if !n.leaf || dumpLeaf {
+		if !n.leaf || DumpLeaf {
 			for i := uint16(0); i < n.count; i++ {
 				fmt.Printf(`<TD PORT="f%d">%s`, i, n.payload[i].ReadKey(buf))
 				if n.leaf {

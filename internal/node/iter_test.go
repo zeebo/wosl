@@ -13,7 +13,7 @@ func TestIterator(t *testing.T) {
 
 		for i := 0; i < 100; i++ {
 			buf := []byte(fmt.Sprint(gen.Intn(100)))
-			assert.That(t, n.Insert(buf, nil))
+			assert.That(t, n.Insert(buf, nil, 0))
 		}
 
 		last, iter := "", n.Iterator()

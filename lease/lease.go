@@ -26,6 +26,9 @@ func (t T) Zero() bool { return t.cb == nil }
 // Node returns the node associated with the lease.
 func (t T) Node() *node.T { return t.n }
 
+// SetNode updates the node associated with the lease.
+func (t *T) SetNode(n *node.T) { t.n = n }
+
 // Block returns the block number the node was retreived with.
 //
 // N.B. This may not be the current block number in the case of

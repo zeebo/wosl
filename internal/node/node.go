@@ -34,7 +34,7 @@ const nodeHeaderPadded = btree.NodeSize - btree.HeaderSize
 type T struct {
 	next    uint32  // pointer to the next node (or 0)
 	height  uint32  // height of the node
-	pivot   uint32  // pivot for special root node
+	pivot   uint32  // pivot of the leader
 	buf     []byte  // buffer containing the keys and values
 	base    uint32  // how many bytes into buf the key/values start
 	entries btree.T // btree of entries into buf
@@ -205,7 +205,7 @@ var nodeInsertThunk mon.Thunk // timing info for node.Insert
 // Insert associates the key with the value in the node. If wrote is
 // false, then there was not enough space, and the node should be
 // flushed.
-func (t *T) Insert(key, value []byte) (wrote bool) {
+func (t *T) Insert(key, value []byte, pivot uint32) (wrote bool) {
 	timer := nodeInsertThunk.Start()
 
 	// make sure the write is ok to go
@@ -216,6 +216,7 @@ func (t *T) Insert(key, value []byte) (wrote bool) {
 
 	// build the entry that we will insert.
 	ent := entry.New(key, value, false, uint32(len(t.buf))-t.base)
+	ent.SetPivot(pivot)
 
 	// add the data to the buffer
 	t.buf = append(t.buf, key...)

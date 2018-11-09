@@ -85,6 +85,7 @@ func (m *memCache) writeBack(n *node.T, block uint32) error {
 	} else if err := m.disk.Write(block, m.buf); err != nil {
 		return errs.Wrap(err)
 	}
+	m.nodes[block] = n
 	return nil
 }
 
