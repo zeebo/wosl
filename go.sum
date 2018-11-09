@@ -6,3 +6,5 @@ github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72 h1:qLC7fQah7D6K1
 github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72/go.mod h1:JwIasOWyU6f++ZhiEuf87xNszmSA2myDM2Kzu9HwQUA=
 github.com/zeebo/errs v1.0.1 h1:IyCxB4H55/Cy+7hOMLWd2C9l9YeMB2J6CKSfKORI7gU=
 github.com/zeebo/errs v1.0.1/go.mod h1:Yj8dHrUQwls1bF3dr/vcSIu+qf4mI7idnTcHfoACc6I=
+github.com/zeebo/mon v0.0.0-20181109011025-1c007b1911dc h1:6zVkhXXI1ayPAiqi7AW37uajX15RROiB8BrU1cP1Xak=
+github.com/zeebo/mon v0.0.0-20181109011025-1c007b1911dc/go.mod h1:vA9QIAuFaaRVSZ59NMcvc9/qXIaz/ju62Ww7cpn8YpI=

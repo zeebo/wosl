@@ -3,7 +3,7 @@ package node
 import (
 	"math"
 
-	"github.com/zeebo/wosl/internal/mon"
+	"github.com/zeebo/mon"
 	"github.com/zeebo/wosl/internal/node/btree"
 	"github.com/zeebo/wosl/internal/node/entry"
 )

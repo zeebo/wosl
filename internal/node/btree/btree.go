@@ -6,7 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/zeebo/errs"
-	"github.com/zeebo/wosl/internal/mon"
+	"github.com/zeebo/mon"
 	"github.com/zeebo/wosl/internal/node/entry"
 )
 

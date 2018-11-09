@@ -5,7 +5,7 @@ import (
 
 	"github.com/cespare/xxhash"
 	"github.com/zeebo/errs"
-	"github.com/zeebo/wosl/internal/mon"
+	"github.com/zeebo/mon"
 	"github.com/zeebo/wosl/internal/node"
 )
 
@@ -108,7 +108,7 @@ func (t *T) Insert(key, value []byte) error {
 	}
 
 	// insert the value. if it cannot be fit, then there's nothing to do.
-	if !t.root.Insert(key, value) {
+	if !t.root.Insert(key, value, 0) {
 		timer.Stop()
 		return Error.New("entry too large to fit")
 	}
@@ -121,7 +121,7 @@ func (t *T) Insert(key, value []byte) error {
 
 	// flush the root and any children that are required. it doesn't need to
 	// have a slice of parents because it can't possibly split.
-	if err := t.flush(t.root, rootBlock, nil); err != nil {
+	if _, _, err := t.flush(t.root, rootBlock, nil); err != nil {
 		timer.Stop()
 		return Error.Wrap(err)
 	}

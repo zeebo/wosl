@@ -86,6 +86,7 @@ func (t *T) flush(n *node.T, block uint32, parents []uint32) (*node.T, []uint32,
 
 	// set the next pointers and allocate blocks.
 	prev := splits[0]
+	_ = prev
 
 	// return the set of children we flushed to so that they can be
 	// flushed. we don't do this recursively to avoid holding a bunch
