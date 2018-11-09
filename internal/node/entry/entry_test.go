@@ -3,7 +3,7 @@ package entry
 import (
 	"testing"
 
-	"github.com/zeebo/wosl/internal/assert"
+	"github.com/zeebo/assert"
 )
 
 func TestEntry(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/zeebo/wosl/internal/assert"
+	"github.com/zeebo/assert"
 )
 
 func TestNode(t *testing.T) {

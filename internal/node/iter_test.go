@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/zeebo/wosl/internal/assert"
+	"github.com/zeebo/assert"
 )
 
 func TestIterator(t *testing.T) {
